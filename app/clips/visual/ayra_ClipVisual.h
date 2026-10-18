@@ -1889,15 +1889,22 @@ struct ClipOverlapVisual
     bool hasOverlap = false;
     bool isCrossfade = false;
     bool isTopClip = true;
+    bool isContainedInPartner = false;
 
-    float startNormX = 0.0f; ///< Inizio dell'overlap in coordinate normalizzate [0..1] della clip
-    float endNormX   = 0.0f; ///< Fine dell'overlap in coordinate normalizzate [0..1] della clip
+    float startNormX = 0.0f;
+    float endNormX   = 0.0f;
+    float partnerFadeNormX = 0.0f;
+
+    bool hasLeftCrossfade = false;
+    bool hasRightCrossfade = false;
+    float leftFadeEndNormX = 0.0f;
+    float rightFadeStartNormX = 1.0f;
 
     juce::Colour partnerTint { juce::Colours::cyan };
     juce::String partnerTitle;
 
-    // Proiezione della curva della clip sottostante nell'intervallo [startNormX .. endNormX]
     bool showPartnerCurve = false;
+    bool showPartnerDotOnly = false;
     float partnerStartNormY = 0.0f;
     float partnerEndNormY   = 0.0f;
     ayra::curves::QuadraticControl partnerCurveControl {};
@@ -1905,15 +1912,23 @@ struct ClipOverlapVisual
     bool partnerPointHovered  = false;
     bool partnerCurveHovered  = false;
 
-    // Per LineClip in modalita' Overlap senza XFade: mostra il salto verticale a inizio overlap
+    float partnerRightStartNormY = 0.0f;
+    float partnerRightEndNormY   = 0.0f;
+    ayra::curves::QuadraticControl partnerRightCurveControl {};
+    bool partnerRightPointSelected = false;
+    bool partnerRightPointHovered  = false;
+    bool partnerRightCurveHovered  = false;
+    juce::String partnerBadgeText;
+
     bool showStepJumpAtStart = false;
     float topClipStartNormY  = 0.0f;
+    float topClipEndNormY    = 0.0f;
 
-    // Per MidiClip: modalita' replace vs merge e note della clip sottostante
     MidiOverlapMode midiMode = MidiOverlapMode::replace;
     const MidiNoteVisual* partnerNotes = nullptr;
     int numPartnerNotes = 0;
 };
+
 
 /** Proiezione completa, non autorevole, necessaria a un paint audio.
     I puntatori sono view valide per la sola chiamata di paint. Il provider ne
@@ -2440,40 +2455,36 @@ inline void drawClipOverlapDecoration (
         return;
 
     const juce::Rectangle<float> ovRect (x0, clipBounds.getY(), x1 - x0, clipBounds.getHeight());
-    const auto seamCol = ov.isCrossfade ? tk::accent() : ov.partnerTint.brighter (0.35f);
+    const auto seamCol = ov.isCrossfade ? tk::accent() : ov.partnerTint.brighter (0.40f);
 
-    // 1. Wash traslucido sulla regione di overlap
-    g.setColour (seamCol.withAlpha (ov.isCrossfade ? 0.13f : 0.08f));
+    g.setColour (seamCol.withAlpha (ov.isCrossfade ? 0.14f : 0.10f));
     g.fillRect (ovRect);
 
-    // 2. Tratteggio diagonale nell'header della zona di overlap
     const auto headerStrip = ovRect.withHeight (juce::jmin (clipTitleAreaHeight, ovRect.getHeight()));
     {
         const juce::Graphics::ScopedSaveState hatchScope (g);
         g.reduceClipRegion (headerStrip.toNearestInt());
-        g.setColour (seamCol.withAlpha (0.30f));
+        g.setColour (seamCol.withAlpha (0.35f));
         for (float hx = headerStrip.getX() - headerStrip.getHeight(); hx < headerStrip.getRight(); hx += 6.5f)
             g.drawLine (hx, headerStrip.getBottom(), hx + headerStrip.getHeight(), headerStrip.getY(), 1.1f);
     }
 
-    // 3. Linea di confine della clip nascosta sotto
     auto drawHiddenClipBoundary = [&] (float seamX, bool pointsInwardLeft)
     {
-        g.setColour (seamCol.withAlpha (0.88f));
+        g.setColour (seamCol.withAlpha (0.92f));
         for (float cy = clipBounds.getY() + 2.0f; cy < clipBounds.getBottom() - 2.0f; cy += 6.0f)
             g.drawVerticalLine (juce::roundToInt (seamX), cy, std::min (cy + 3.5f, clipBounds.getBottom() - 2.0f));
 
-        const float arm = pointsInwardLeft ? -4.5f : 4.5f;
-        g.drawLine (seamX, clipBounds.getY() + 1.5f, seamX + arm, clipBounds.getY() + 1.5f, 1.6f);
-        g.drawLine (seamX, clipBounds.getBottom() - 1.5f, seamX + arm, clipBounds.getBottom() - 1.5f, 1.6f);
+        const float arm = pointsInwardLeft ? -5.0f : 5.0f;
+        g.drawLine (seamX, clipBounds.getY() + 1.5f, seamX + arm, clipBounds.getY() + 1.5f, 1.8f);
+        g.drawLine (seamX, clipBounds.getBottom() - 1.5f, seamX + arm, clipBounds.getBottom() - 1.5f, 1.8f);
     };
 
-    if (ov.endNormX < 0.998f)
+    if (ov.endNormX < 0.998f || ov.isContainedInPartner)
         drawHiddenClipBoundary (x1, true);
-    if (ov.startNormX > 0.002f)
+    if (ov.startNormX > 0.002f || ov.isContainedInPartner)
         drawHiddenClipBoundary (x0, false);
 
-    // 4. Note della clip MIDI sottostante
     if (isMidiClip && ov.partnerNotes != nullptr && ov.numPartnerNotes > 0)
     {
         for (int ni = 0; ni < ov.numPartnerNotes; ++ni)
@@ -2494,10 +2505,10 @@ inline void drawClipOverlapDecoration (
             const auto velCol = clip_midi_law::colourForVelocity (pn.velocity);
             if (ov.midiMode == MidiOverlapMode::merge)
             {
-                g.setColour (velCol.withAlpha (0.34f));
+                g.setColour (velCol.withAlpha (0.38f));
                 g.fillRoundedRectangle (clippedNote, 2.0f);
-                g.setColour (velCol.brighter (0.2f).withAlpha (0.72f));
-                g.drawRoundedRectangle (clippedNote, 2.0f, 0.9f);
+                g.setColour (velCol.brighter (0.25f).withAlpha (0.80f));
+                g.drawRoundedRectangle (clippedNote, 2.0f, 1.0f);
             }
             else
             {
@@ -2505,39 +2516,34 @@ inline void drawClipOverlapDecoration (
                 border.addRoundedRectangle (clippedNote, 2.0f);
                 juce::Path dashed;
                 constexpr float dashes[] = { 3.0f, 2.5f };
-                juce::PathStrokeType (0.9f).createDashedStroke (dashed, border, dashes, 2);
-                g.setColour (velCol.withAlpha (0.38f));
+                juce::PathStrokeType (1.0f).createDashedStroke (dashed, border, dashes, 2);
+                g.setColour (velCol.withAlpha (0.45f));
                 g.fillPath (dashed);
             }
         }
     }
 
-    // 5. Curva della clip sottostante (Rampa XFade oppure Curva Ghost in Overlap)
-    if (ov.showPartnerCurve && ! curveAreaBounds.isEmpty())
+    auto drawPartnerRampAndHandle = [&] (float rx0, float ry0, float rx1, float ry1,
+                                         const ayra::curves::QuadraticControl& ctrl,
+                                         float dotX, float dotY,
+                                         bool ptHovered, bool ptSelected, bool curveHovered)
     {
-        const float cx0 = curveAreaBounds.getX() + juce::jlimit (0.0f, 1.0f, ov.startNormX) * curveAreaBounds.getWidth();
-        const float cx1 = curveAreaBounds.getX() + juce::jlimit (0.0f, 1.0f, ov.endNormX)   * curveAreaBounds.getWidth();
-        const float py0 = curveAreaBounds.getBottom() - juce::jlimit (0.0f, 1.0f, ov.partnerStartNormY) * curveAreaBounds.getHeight();
-        const float py1 = curveAreaBounds.getBottom() - juce::jlimit (0.0f, 1.0f, ov.partnerEndNormY)   * curveAreaBounds.getHeight();
-
-        const auto seg = makeBoundedCurvePixelSegment (
-            { cx0, py0 }, { cx1, py1 }, ov.partnerCurveControl);
-
-        juce::Path partnerPath;
-        partnerPath.startNewSubPath (seg.start);
-        appendBoundedCurvePixelSegment (partnerPath, seg);
-
-        if (ov.isCrossfade)
+        if (std::abs (rx1 - rx0) > 1.0f)
         {
-            g.setColour (juce::Colour (0x55000000));
-            g.strokePath (partnerPath, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-            g.setColour (ov.partnerTint.brighter (0.45f).withAlpha (0.92f));
+            const auto seg = makeBoundedCurvePixelSegment ({ rx0, ry0 }, { rx1, ry1 }, ctrl);
+            juce::Path partnerPath;
+            partnerPath.startNewSubPath (seg.start);
+            appendBoundedCurvePixelSegment (partnerPath, seg);
+
+            g.setColour (juce::Colour (0x60000000));
+            g.strokePath (partnerPath, juce::PathStrokeType (4.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (ov.partnerTint.brighter (0.55f).withAlpha (0.95f));
             g.strokePath (partnerPath, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-            const float hr = ov.partnerCurveHovered ? 4.5f : 3.5f;
+            const float hr = curveHovered ? 4.5f : 3.5f;
             const auto hCol = tk::accent().brighter (0.25f);
             const juce::Rectangle<float> hDot (seg.control.x - hr, seg.control.y - hr, hr * 2.0f, hr * 2.0f);
-            if (ov.partnerCurveHovered)
+            if (curveHovered)
             {
                 g.setColour (hCol.withAlpha (0.35f));
                 g.fillEllipse (hDot.expanded (3.0f));
@@ -2546,39 +2552,118 @@ inline void drawClipOverlapDecoration (
             }
             g.setColour (hCol);
             g.drawEllipse (hDot, 1.4f);
+        }
 
-            const float pr = (ov.partnerPointHovered || ov.partnerPointSelected) ? 5.5f : 4.0f;
-            const juce::Rectangle<float> pDot (cx0 - pr, py0 - pr, pr * 2.0f, pr * 2.0f);
-            g.setColour ((ov.partnerPointHovered || ov.partnerPointSelected) ? tk::accent() : ov.partnerTint.brighter (0.5f));
-            g.fillEllipse (pDot);
-            g.setColour (juce::Colours::white);
-            g.drawEllipse (pDot.reduced (0.5f), 1.2f);
+        const bool activePt = ptHovered || ptSelected;
+        g.setColour (activePt ? tk::accent() : juce::Colours::white.withAlpha (0.65f));
+        for (float cy = dotY + 2.0f; cy < curveAreaBounds.getBottom() - 1.0f; cy += 7.0f)
+        {
+            const float yEnd = std::min (cy + 4.0f, curveAreaBounds.getBottom() - 1.0f);
+            if (activePt) g.drawLine (dotX, cy, dotX, yEnd, 1.8f);
+            else          g.drawVerticalLine (juce::roundToInt (dotX), cy, yEnd);
+        }
+
+        const float pr = activePt ? 5.5f : 4.0f;
+        const juce::Rectangle<float> pDot (dotX - pr, dotY - pr, pr * 2.0f, pr * 2.0f);
+        if (activePt)
+        {
+            g.setColour (tk::accent().withAlpha (0.35f));
+            g.fillEllipse (pDot.expanded (3.0f));
+        }
+        g.setColour (activePt ? tk::accent() : juce::Colours::white);
+        g.fillEllipse (pDot);
+        g.setColour (ptSelected ? juce::Colours::white : juce::Colour (0x60000000));
+        g.drawEllipse (pDot.reduced (0.5f), ptSelected ? 1.5f : 1.0f);
+    };
+
+    if ((ov.showPartnerCurve || ov.showPartnerDotOnly) && ! curveAreaBounds.isEmpty())
+    {
+        const auto normToY = [&curveAreaBounds] (float ny) noexcept
+        {
+            return curveAreaBounds.getBottom() - juce::jlimit (0.0f, 1.0f, ny) * curveAreaBounds.getHeight();
+        };
+
+        if (ov.isContainedInPartner && (ov.hasLeftCrossfade || ov.hasRightCrossfade))
+        {
+            if (ov.hasLeftCrossfade)
+            {
+                const float lx0 = automationPointRenderX (curveAreaBounds, 0, 2, ov.startNormX);
+                const float lx1 = automationPointRenderX (curveAreaBounds, 0, 2, ov.leftFadeEndNormX);
+                const float ly0 = normToY (ov.partnerStartNormY);
+                const float ly1 = normToY (ov.partnerEndNormY);
+                if (ov.showPartnerCurve)
+                    drawPartnerRampAndHandle (lx0, ly0, lx1, ly1, ov.partnerCurveControl,
+                                              lx0, ly0, ov.partnerPointHovered, ov.partnerPointSelected, ov.partnerCurveHovered);
+                else
+                    drawPartnerRampAndHandle (lx0, ly0, lx0, ly0, ov.partnerCurveControl,
+                                              lx0, ly0, ov.partnerPointHovered, ov.partnerPointSelected, false);
+            }
+
+            if (ov.hasRightCrossfade)
+            {
+                const float rx0 = automationPointRenderX (curveAreaBounds, 1, 2, ov.rightFadeStartNormX);
+                const float rx1 = automationPointRenderX (curveAreaBounds, 1, 2, ov.endNormX);
+                const float ry0 = normToY (ov.partnerRightStartNormY);
+                const float ry1 = normToY (ov.partnerRightEndNormY);
+                if (ov.showPartnerCurve)
+                    drawPartnerRampAndHandle (rx0, ry0, rx1, ry1, ov.partnerRightCurveControl,
+                                              rx1, ry1, ov.partnerRightPointHovered, ov.partnerRightPointSelected, ov.partnerRightCurveHovered);
+                else
+                    drawPartnerRampAndHandle (rx1, ry1, rx1, ry1, ov.partnerRightCurveControl,
+                                              rx1, ry1, ov.partnerRightPointHovered, ov.partnerRightPointSelected, false);
+            }
         }
         else
         {
-            juce::Path dashedPartner;
-            constexpr float dashes[] = { 4.0f, 3.0f };
-            juce::PathStrokeType (1.4f).createDashedStroke (dashedPartner, partnerPath, dashes, 2);
-            g.setColour (ov.partnerTint.brighter (0.35f).withAlpha (0.42f));
-            g.fillPath (dashedPartner);
+            const float partnerPtNormX = (ov.isCrossfade && ov.partnerFadeNormX >= 0.0f)
+                                       ? ov.partnerFadeNormX : ov.startNormX;
+            const float cx0 = automationPointRenderX (curveAreaBounds, 0, 2, partnerPtNormX);
+            const float cx1 = curveAreaBounds.getX() + juce::jlimit (0.0f, 1.0f, ov.endNormX) * curveAreaBounds.getWidth();
+            const float py0 = normToY (ov.partnerStartNormY);
+            const float py1 = normToY (ov.partnerEndNormY);
 
-            if (ov.showStepJumpAtStart)
+            if (ov.isCrossfade)
             {
-                const float topStartY = curveAreaBounds.getBottom()
-                                      - juce::jlimit (0.0f, 1.0f, ov.topClipStartNormY) * curveAreaBounds.getHeight();
-                juce::Path jumpPath;
-                jumpPath.startNewSubPath (cx0, py0);
-                jumpPath.lineTo (cx0, topStartY);
-                juce::Path dashedJump;
-                juce::PathStrokeType (1.5f).createDashedStroke (dashedJump, jumpPath, dashes, 2);
-                g.setColour (juce::Colours::white.withAlpha (0.70f));
-                g.fillPath (dashedJump);
+                drawPartnerRampAndHandle (
+                    cx0, py0, ov.showPartnerCurve ? cx1 : cx0, ov.showPartnerCurve ? py1 : py0,
+                    ov.partnerCurveControl, cx0, py0,
+                    ov.partnerPointHovered, ov.partnerPointSelected, ov.partnerCurveHovered);
+            }
+            else if (ov.showPartnerCurve)
+            {
+                const auto seg = makeBoundedCurvePixelSegment ({ cx0, py0 }, { cx1, py1 }, ov.partnerCurveControl);
+                juce::Path partnerPath;
+                partnerPath.startNewSubPath (seg.start);
+                appendBoundedCurvePixelSegment (partnerPath, seg);
+
+                juce::Path dashedPartner;
+                constexpr float dashes[] = { 4.0f, 3.0f };
+                juce::PathStrokeType (1.5f).createDashedStroke (dashedPartner, partnerPath, dashes, 2);
+                g.setColour (ov.partnerTint.brighter (0.45f).withAlpha (0.55f));
+                g.fillPath (dashedPartner);
+
+                if (ov.showStepJumpAtStart)
+                {
+                    const float topStartY = normToY (ov.topClipStartNormY);
+                    juce::Path jumpPath;
+                    jumpPath.startNewSubPath (cx0, py0);
+                    jumpPath.lineTo (cx0, topStartY);
+                    if (ov.isContainedInPartner)
+                    {
+                        const float topEndY = normToY (ov.topClipEndNormY);
+                        jumpPath.startNewSubPath (cx1, topEndY);
+                        jumpPath.lineTo (cx1, py1);
+                    }
+                    juce::Path dashedJump;
+                    juce::PathStrokeType (1.6f).createDashedStroke (dashedJump, jumpPath, dashes, 2);
+                    g.setColour (juce::Colours::white.withAlpha (0.78f));
+                    g.fillPath (dashedJump);
+                }
             }
         }
     }
 
-    // 6. Badge compatto dello stato di Overlap ("XFADE" / "MERGE" / "OVERLAP")
-    if (ovRect.getWidth() >= 46.0f && clipBounds.getHeight() >= 40.0f)
+    if (ovRect.getWidth() >= 42.0f && clipBounds.getHeight() >= 38.0f)
     {
         const juce::String badgeText = ov.isCrossfade ? "XFADE"
                                      : (isMidiClip && ov.midiMode == MidiOverlapMode::merge) ? "MERGE"
@@ -2587,7 +2672,7 @@ inline void drawClipOverlapDecoration (
                                     : (isMidiClip && ov.midiMode == MidiOverlapMode::merge) ? tk::streamAudio()
                                     : seamCol;
 
-        const float bw = juce::jmin (54.0f, ovRect.getWidth() - 6.0f);
+        const float bw = juce::jmin (54.0f, ovRect.getWidth() - 4.0f);
         const float bh = 13.0f;
         const float bx = ovRect.getCentreX() - bw * 0.5f;
         const float by = clipBounds.getY() + clipTitleAreaHeight + 3.0f;
@@ -2595,14 +2680,13 @@ inline void drawClipOverlapDecoration (
 
         g.setColour (juce::Colour (0xd80b171e));
         g.fillRoundedRectangle (pillRect, bh * 0.5f);
-        g.setColour (badgeCol.withAlpha (0.90f));
+        g.setColour (badgeCol.withAlpha (0.92f));
         g.drawRoundedRectangle (pillRect, bh * 0.5f, 1.0f);
         g.setColour (juce::Colours::white);
         g.setFont (tk::type::caption().boldened().withHeight (8.5f));
         g.drawText (badgeText, pillRect.toNearestInt(), juce::Justification::centred, false);
     }
 }
-
 //==============================================================================
 // PROIEZIONI VISUALI LINE CLIP E LANE GLOBALI
 //==============================================================================

@@ -955,7 +955,7 @@ private:
                     if (!refClipId.empty() && left->id != refClipId && right->id != refClipId)
                         continue;
                     const bool isSubsumed = clips::isClipSubInterval (left->start, left->length, right->start, right->length);
-                    const bool inXfade = (!isSubsumed) && xfadePairs.contains ({ left->id, right->id });
+                    const bool inXfade = xfadePairs.contains ({ left->id, right->id });
                     const std::string partner = (left->id == refClipId) ? right->id : left->id;
                     return { true, inXfade, left->id, right->id, ovStart, ovEnd, isSubsumed, partner };
                 }
@@ -982,7 +982,7 @@ private:
                 if (ovEnd > ovStart + 1.0e-3)
                 {
                     const bool isSubsumed = clips::isClipSubInterval (left->start, left->length, right->start, right->length);
-                    const bool inXfade = (!isSubsumed) && xfadePairs.contains ({ left->id, right->id });
+                    const bool inXfade = xfadePairs.contains ({ left->id, right->id });
                     return { true, inXfade, left->id, right->id, ovStart, ovEnd, isSubsumed, cA->id };
                 }
             }
@@ -990,7 +990,7 @@ private:
         return {};
     }
 
-    void syncActiveAudioCrossfades (const std::string& modifiedClipId = {}, bool syncGainValue = false)
+    void syncActiveAudioCrossfades (const std::string& modifiedClipId = {}, bool snapEndpointsToOverlap = false, bool syncGainValue = false)
     {
         const auto sorted = getClipsSortedByZOrder();
         std::set<std::pair<std::string, std::string>> validPairs;
@@ -999,61 +999,57 @@ private:
         {
             for (size_t j = i + 1; j < sorted.size(); ++j)
             {
-                const auto* cA = sorted[i];
-                const auto* cB = sorted[j];
-                const auto* left = (cA->start <= cB->start) ? cA : cB;
-                const auto* right = (cA->start <= cB->start) ? cB : cA;
+                const auto* left = sorted[i];
+                const auto* right = sorted[j];
+                const double leftEnd = left->start + left->length;
+                const double rightEnd = right->start + right->length;
                 const double ovStart = std::max (left->start, right->start);
-                const double ovEnd   = std::min (left->start + left->length, right->start + right->length);
+                const double ovEnd   = std::min (leftEnd, rightEnd);
                 const std::pair<std::string, std::string> key { left->id, right->id };
 
-                const bool isSubsumed = clips::isClipSubInterval (left->start, left->length, right->start, right->length);
+                if (ovEnd <= ovStart + 0.01 || !uiStates.contains (left->id) || !uiStates.contains (right->id))
+                    continue;
 
-                if (ovEnd > ovStart + 0.01 && (!isSubsumed) && xfadePairs.contains (key))
+                auto& leftUi  = uiStates[left->id];
+                auto& rightUi = uiStates[right->id];
+                if (leftUi.gainPoints.size() < 2 || rightUi.gainPoints.size() < 2)
+                    continue;
+
+                const bool isContained = (left->start < right->start - 0.001) && (rightEnd < leftEnd - 0.001);
+
+                if (xfadePairs.contains (key))
                 {
                     validPairs.insert (key);
-                    if (!uiStates.contains (left->id) || !uiStates.contains (right->id))
-                        continue;
 
-                    auto& leftUi  = uiStates[left->id];
-                    auto& rightUi = uiStates[right->id];
-                    if (leftUi.gainPoints.size() < 2 || rightUi.gainPoints.size() < 2)
-                        continue;
+                    if (isContained)
+                    {
+                        if (snapEndpointsToOverlap)
+                        {
+                            if (rightUi.gainPoints.front().normX <= 0.01f)
+                                rightUi.gainPoints.front().normX = 0.22f;
+                            if (rightUi.gainPoints.back().normX >= 0.99f)
+                                rightUi.gainPoints.back().normX = 0.78f;
+                        }
+                    }
+                    else
+                    {
+                        const float leftMinX  = leftUi.gainPoints.size() > 2 ? (leftUi.gainPoints[leftUi.gainPoints.size() - 2].normX + 0.01f) : 0.02f;
+                        const float rightMaxX = rightUi.gainPoints.size() > 2 ? (rightUi.gainPoints[1].normX - 0.01f) : 0.98f;
 
-                    const float nominalLeftFadeIn = left->length > 0.001
-                        ? static_cast<float> (left->fadeIn / left->length) : 0.0f;
-                    const float targetLeftFadeOutNormX = static_cast<float> (
-                        (ovStart - left->start) / std::max (0.05, left->length));
-                    clips::applySmartShrinkPushLeft (leftUi.gainPoints, targetLeftFadeOutNormX, nominalLeftFadeIn);
+                        if (snapEndpointsToOverlap)
+                        {
+                            leftUi.gainPoints.back().normX   = juce::jlimit (leftMinX, 0.99f, static_cast<float> ((ovStart - left->start) / std::max (0.05, left->length)));
+                            rightUi.gainPoints.front().normX = juce::jlimit (0.01f, rightMaxX, static_cast<float> ((ovEnd - right->start) / std::max (0.05, right->length)));
+                        }
 
-                    const float nominalRightFadeOut = right->length > 0.001
-                        ? static_cast<float> (1.0 - right->fadeOut / right->length) : 1.0f;
-                    const float targetRightFadeInNormX = static_cast<float> (
-                        (ovEnd - right->start) / std::max (0.05, right->length));
-                    clips::applySmartShrinkPushRight (rightUi.gainPoints, targetRightFadeInNormX, nominalRightFadeOut);
-
-                    // Interroga il solver di crossfade per calcolare curve e compensazione
-                    AudioCrossfadeContext ctx;
-                    ctx.interaction = syncGainValue ? CrossfadeInteractionKind::levelChange : CrossfadeInteractionKind::boundaryResize;
-                    ctx.modifiedClipId = modifiedClipId;
-                    ctx.isLeftClipModified = (modifiedClipId == left->id);
-                    ctx.leftClipId = left->id;
-                    ctx.rightClipId = right->id;
-                    ctx.currentLeftGainDb = leftUi.gainPoints.back().gainDb;
-                    ctx.currentRightGainDb = rightUi.gainPoints.front().gainDb;
-                    ctx.requestedGainDb = (modifiedClipId == left->id) ? leftUi.gainPoints.back().gainDb : rightUi.gainPoints.front().gainDb;
-                    ctx.leftFadeOutControl = { leftUi.fadeOutControlX, leftUi.fadeOutCurve, leftUi.fadeOutControlWeight };
-                    ctx.rightFadeInControl = { rightUi.fadeInControlX, rightUi.fadeInCurve, rightUi.fadeInControlWeight };
-                    ctx.overlapDurationSec = ovEnd - ovStart;
-
-                    const auto res = solveAudioCrossfade (ctx);
-                    leftUi.fadeOutControlX = static_cast<float> (res.leftFadeOutControl.x);
-                    leftUi.fadeOutCurve    = static_cast<float> (res.leftFadeOutControl.y);
-                    leftUi.fadeOutControlWeight = static_cast<float> (res.leftFadeOutControl.weight);
-
-                    rightUi.fadeInControlX = static_cast<float> (res.rightFadeInControl.x);
-                    rightUi.fadeInCurve    = static_cast<float> (res.rightFadeInControl.y);
-                    rightUi.fadeInControlWeight = static_cast<float> (res.rightFadeInControl.weight);
+                        if (syncGainValue)
+                        {
+                            if (modifiedClipId == left->id)
+                                rightUi.gainPoints.front().gainDb = leftUi.gainPoints.back().gainDb;
+                            else if (modifiedClipId == right->id)
+                                leftUi.gainPoints.back().gainDb = rightUi.gainPoints.front().gainDb;
+                        }
+                    }
                 }
             }
         }
@@ -1062,24 +1058,10 @@ private:
         {
             if (!validPairs.contains (oldPair))
             {
-                const auto* cLeft = findClip (oldPair.first);
-                const auto* cRight = findClip (oldPair.second);
-                if (cLeft != nullptr && uiStates.contains (oldPair.first) && !uiStates[oldPair.first].gainPoints.empty())
-                {
-                    auto& pts = uiStates[oldPair.first].gainPoints;
-                    const float nominalFadeIn = cLeft->length > 0.001 ? static_cast<float> (cLeft->fadeIn / cLeft->length) : 0.0f;
-                    const float nominalFadeOut = cLeft->length > 0.001 ? static_cast<float> (1.0 - cLeft->fadeOut / cLeft->length) : 1.0f;
-                    pts.front().normX = nominalFadeIn;
-                    pts.back().normX  = nominalFadeOut;
-                }
-                if (cRight != nullptr && uiStates.contains (oldPair.second) && !uiStates[oldPair.second].gainPoints.empty())
-                {
-                    auto& pts = uiStates[oldPair.second].gainPoints;
-                    const float nominalFadeIn = cRight->length > 0.001 ? static_cast<float> (cRight->fadeIn / cRight->length) : 0.0f;
-                    const float nominalFadeOut = cRight->length > 0.001 ? static_cast<float> (1.0 - cRight->fadeOut / cRight->length) : 1.0f;
-                    pts.front().normX = nominalFadeIn;
-                    pts.back().normX  = nominalFadeOut;
-                }
+                if (uiStates.contains (oldPair.first) && !uiStates[oldPair.first].gainPoints.empty())
+                    uiStates[oldPair.first].gainPoints.back().normX = 1.0f;
+                if (uiStates.contains (oldPair.second) && !uiStates[oldPair.second].gainPoints.empty())
+                    uiStates[oldPair.second].gainPoints.front().normX = 0.0f;
             }
         }
         xfadePairs = std::move (validPairs);
@@ -1172,40 +1154,68 @@ private:
         if (ovInfo.inOverlap && clip->length > 0.001)
         {
             visual.overlap.hasOverlap  = true;
-            visual.overlap.isCrossfade = ovInfo.inCrossfade;
             visual.overlap.isTopClip   = true;
             visual.overlap.startNormX  = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.startSec - clip->start) / clip->length));
             visual.overlap.endNormX    = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.endSec - clip->start) / clip->length));
             visual.overlap.partnerTint = visual.tint;
 
-            const std::string partnerId = ovInfo.partnerClipId.empty()
-                ? ((ovInfo.leftClipId == clipId) ? ovInfo.rightClipId : ovInfo.leftClipId)
-                : ovInfo.partnerClipId;
-            const auto* partnerClip = findClip (partnerId);
-            if (partnerClip != nullptr && uiStates.contains (partnerId) && partnerClip->length > 0.001)
+            const auto leftClipIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                  [&ovInfo] (const Clip& c) { return c.id == ovInfo.leftClipId; });
+            if (leftClipIt != data.clips.end() && uiStates.contains (ovInfo.leftClipId) && leftClipIt->length > 0.001)
             {
-                const auto& partnerUi = uiStates.at (partnerId);
+                const auto& leftUi = uiStates.at (ovInfo.leftClipId);
+                const bool isContained = (leftClipIt->start < clip->start - 0.001)
+                                      && ((clip->start + clip->length) < (leftClipIt->start + leftClipIt->length) - 0.001);
+                visual.overlap.isContainedInPartner = isContained;
                 visual.overlap.showPartnerCurve = true;
-                if (ovInfo.inCrossfade && !partnerUi.gainPoints.empty())
+
+                const float leftNorm0 = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.startSec - leftClipIt->start) / leftClipIt->length));
+                const float leftNorm1 = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.endSec - leftClipIt->start) / leftClipIt->length));
+                const float db0 = clip_gain_law::evaluateGainDbAt (leftUi.gainPoints.data(), static_cast<int> (leftUi.gainPoints.size()), leftUi.gainDb, leftNorm0, gainBoundarySpec (leftUi));
+                const float db1 = clip_gain_law::evaluateGainDbAt (leftUi.gainPoints.data(), static_cast<int> (leftUi.gainPoints.size()), leftUi.gainDb, leftNorm1, gainBoundarySpec (leftUi));
+
+                if (isContained)
                 {
-                    visual.overlap.partnerStartNormY   = clip_gain_law::dbToNorm (partnerUi.gainPoints.back().gainDb);
-                    visual.overlap.partnerEndNormY     = 0.0f;
-                    visual.overlap.partnerCurveControl = { partnerUi.fadeOutControlX, partnerUi.fadeOutCurve, partnerUi.fadeOutControlWeight };
-                    visual.overlap.partnerPointSelected = partnerUi.gainPoints.back().selected;
-                    visual.overlap.partnerPointHovered  = (hoveredClipId == partnerId
-                                                        && activeZone == TimelineClipZone::gainEnvelopePoint
-                                                        && hoveredGainIdx == static_cast<int> (partnerUi.gainPoints.size()) - 1);
-                    visual.overlap.partnerCurveHovered  = (hoveredClipId == partnerId
-                                                        && activeZone == TimelineClipZone::fadeOutCurveHandle);
+                    const float topFadeInX  = ui.gainPoints.empty() ? 0.0f : ui.gainPoints.front().normX;
+                    const float topFadeOutX = ui.gainPoints.empty() ? 1.0f : ui.gainPoints.back().normX;
+                    const bool hasLeft  = ovInfo.inCrossfade;
+                    const bool hasRight = ovInfo.inCrossfade;
+
+                    visual.overlap.isCrossfade          = ovInfo.inCrossfade;
+                    visual.overlap.hasLeftCrossfade     = hasLeft;
+                    visual.overlap.hasRightCrossfade    = hasRight;
+                    visual.overlap.leftFadeEndNormX     = hasLeft ? juce::jmax (0.02f, topFadeInX) : 0.0f;
+                    visual.overlap.rightFadeStartNormX  = hasRight ? juce::jmin (0.98f, topFadeOutX) : 1.0f;
+                    visual.overlap.partnerStartNormY    = clip_gain_law::dbToNorm (db0);
+                    visual.overlap.partnerEndNormY      = (hasLeft || hasRight) ? 0.0f : clip_gain_law::dbToNorm (db1);
+                    visual.overlap.partnerCurveControl  = { ui.fadeInControlX, 1.0f - ui.fadeInCurve, ui.fadeInControlWeight };
+                    visual.overlap.partnerRightStartNormY = 0.0f;
+                    visual.overlap.partnerRightEndNormY   = clip_gain_law::dbToNorm (db1);
+                    visual.overlap.partnerRightCurveControl = { ui.fadeOutControlX, 1.0f - ui.fadeOutCurve, ui.fadeOutControlWeight };
                 }
                 else
                 {
-                    const float leftNorm0 = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.startSec - partnerClip->start) / partnerClip->length));
-                    const float leftNorm1 = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.endSec - partnerClip->start) / partnerClip->length));
-                    const float db0 = clip_gain_law::evaluateGainDbAt (partnerUi.gainPoints.data(), static_cast<int> (partnerUi.gainPoints.size()), partnerUi.gainDb, leftNorm0, gainBoundarySpec (partnerUi));
-                    const float db1 = clip_gain_law::evaluateGainDbAt (partnerUi.gainPoints.data(), static_cast<int> (partnerUi.gainPoints.size()), partnerUi.gainDb, leftNorm1, gainBoundarySpec (partnerUi));
-                    visual.overlap.partnerStartNormY = clip_gain_law::dbToNorm (db0);
-                    visual.overlap.partnerEndNormY   = clip_gain_law::dbToNorm (db1);
+                    const bool hasXFade = ovInfo.inCrossfade;
+                    visual.overlap.isCrossfade = hasXFade;
+                    if (hasXFade && !leftUi.gainPoints.empty())
+                    {
+                        const double leftPtSec = leftClipIt->start + static_cast<double> (leftUi.gainPoints.back().normX) * leftClipIt->length;
+                        visual.overlap.partnerFadeNormX     = juce::jlimit (0.0f, 1.0f, static_cast<float> ((leftPtSec - clip->start) / clip->length));
+                        visual.overlap.partnerStartNormY    = clip_gain_law::dbToNorm (leftUi.gainPoints.back().gainDb);
+                        visual.overlap.partnerEndNormY      = 0.0f;
+                        visual.overlap.partnerCurveControl  = { leftUi.fadeOutControlX, leftUi.fadeOutCurve, leftUi.fadeOutControlWeight };
+                        visual.overlap.partnerPointSelected = leftUi.gainPoints.back().selected;
+                        visual.overlap.partnerPointHovered  = ((hoveredClipId == ovInfo.leftClipId || draggedClipId == ovInfo.leftClipId)
+                                                            && (activeZone == TimelineClipZone::gainEnvelopePoint || activeZone == TimelineClipZone::gainPointDashedLine)
+                                                            && hoveredGainIdx == static_cast<int> (leftUi.gainPoints.size()) - 1);
+                        visual.overlap.partnerCurveHovered  = ((hoveredClipId == ovInfo.leftClipId || draggedClipId == ovInfo.leftClipId)
+                                                            && activeZone == TimelineClipZone::fadeOutCurveHandle);
+                    }
+                    else
+                    {
+                        visual.overlap.partnerStartNormY = clip_gain_law::dbToNorm (db0);
+                        visual.overlap.partnerEndNormY   = clip_gain_law::dbToNorm (db1);
+                    }
                 }
             }
         }
@@ -2395,19 +2405,14 @@ private:
 
         const double clickSec = clips::timelineSecondsFromCanvasX (e.position.x, getWidth());
         const auto ovInfo = findOverlapAtTime (clickSec, hit.clip->id);
-        if (ovInfo.inOverlap && hit.zone == TimelineClipZone::none)
+        if (ovInfo.inOverlap && (hit.zone == TimelineClipZone::none || hit.zone == TimelineClipZone::clipBody))
         {
-            if (ovInfo.isSubsumed)
-            {
-                // In Layering / Mute Overlay mode (clip totally inside another), 2-way crossfade is disabled.
-                return;
-            }
             const std::pair<std::string, std::string> pairKey { ovInfo.leftClipId, ovInfo.rightClipId };
             if (xfadePairs.contains (pairKey))
                 xfadePairs.erase (pairKey);
             else
                 xfadePairs.insert (pairKey);
-            syncActiveAudioCrossfades (hit.clip->id, false);
+            syncActiveAudioCrossfades (hit.clip->id, true, false);
             updateWaveforms (ovInfo.leftClipId);
             updateWaveforms (ovInfo.rightClipId);
             repaint();
