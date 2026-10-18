@@ -37,6 +37,12 @@ struct TimelinePointerContext
     ClipKind kind = ClipKind::audio;
     TimelineClipZone zone = TimelineClipZone::none;
     KeyframeLaneType keyframeLaneType = KeyframeLaneType::points;
+    bool isInClipOverlap = false;
+    bool isInCrossfade = false;
+    std::string overlappedPartnerClipId;
+    double overlapStartSeconds = 0.0;
+    double overlapEndSeconds = 0.0;
+    MidiOverlapMode midiOverlapMode = MidiOverlapMode::replace;
     std::string trackId;
     std::string itemId;
     juce::Point<float> localPosition;

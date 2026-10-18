@@ -460,6 +460,10 @@ void ClipDefaultLookAndFeel::drawAudioClip (
             }
         }
 
+        const juce::Rectangle<float> audioCurveBounds (
+            v.bounds.getX(), waveformTop, v.bounds.getWidth(), waveformHeight);
+        drawClipOverlapDecoration (g, v.bounds, audioCurveBounds, v.overlap);
+
         // 5. Unico inviluppo Gain: primo e ultimo punto sono anche gli
         // endpoint di fade-in/fade-out, senza una seconda curva sovrapposta.
         if (v.features.showGainEnvelope)
@@ -680,6 +684,10 @@ void ClipDefaultLookAndFeel::drawMidiClip (
                                   v.bounds.getX() + 3.0f, v.bounds.getRight() - 3.0f);
         }
 
+
+        drawClipOverlapDecoration (
+            g, v.bounds, midiLayout.pianoRollBounds, v.overlap,
+            true, v.displayMinPitch, v.displayMaxPitch, v.isDrumMode, v.zoomLod);
 
         // 2c. Rendering delle Note MIDI (Pillole Melodiche o Rombi Drum Mode)
         if (v.notes != nullptr && v.numNotes > 0)
@@ -1194,6 +1202,8 @@ void ClipDefaultLookAndFeel::drawLineClip (
                 }
             }
         }
+
+        drawClipOverlapDecoration (g, v.bounds, bodyArea, v.overlap);
 
         // 4. Inviluppo Linea: motore unificato con la policy della clip.
         if (v.features.showGainEnvelope && v.points != nullptr && v.numPoints >= 2)

@@ -1742,6 +1742,52 @@ namespace clip_gain_law
     }
 }
 
+
+//==============================================================================
+// OVERLAP & CROSSFADE (XFADE v1: Audio Gain, Line Param, Image Alpha, MIDI Merge/Replace)
+//==============================================================================
+
+/** Modalita' di sovrapposizione per le clip MIDI. */
+enum class MidiOverlapMode : std::uint8_t
+{
+    replace = 0, ///< La clip successiva vince (default comune a tutte le clip)
+    merge        ///< Le note si fondono; la clip sopra (editabile nell'overlap) e' l'ultima selezionata
+};
+
+struct MidiNoteVisual;
+
+/** Proiezione visuale di una regione di Overlap o Crossfade (XFade) su una clip. */
+struct ClipOverlapVisual
+{
+    bool hasOverlap = false;
+    bool isCrossfade = false;
+    bool isTopClip = true;
+
+    float startNormX = 0.0f; ///< Inizio dell'overlap in coordinate normalizzate [0..1] della clip
+    float endNormX   = 0.0f; ///< Fine dell'overlap in coordinate normalizzate [0..1] della clip
+
+    juce::Colour partnerTint { juce::Colours::cyan };
+    juce::String partnerTitle;
+
+    // Proiezione della curva della clip sottostante nell'intervallo [startNormX .. endNormX]
+    bool showPartnerCurve = false;
+    float partnerStartNormY = 0.0f;
+    float partnerEndNormY   = 0.0f;
+    ayra::curves::QuadraticControl partnerCurveControl {};
+    bool partnerPointSelected = false;
+    bool partnerPointHovered  = false;
+    bool partnerCurveHovered  = false;
+
+    // Per LineClip in modalita' Overlap senza XFade: mostra il salto verticale a inizio overlap
+    bool showStepJumpAtStart = false;
+    float topClipStartNormY  = 0.0f;
+
+    // Per MidiClip: modalita' replace vs merge e note della clip sottostante
+    MidiOverlapMode midiMode = MidiOverlapMode::replace;
+    const MidiNoteVisual* partnerNotes = nullptr;
+    int numPartnerNotes = 0;
+};
+
 /** Proiezione completa, non autorevole, necessaria a un paint audio.
     I puntatori sono view valide per la sola chiamata di paint. Il provider ne
     garantisce il lifetime e il widget non li conserva oltre il frame. */
@@ -1795,6 +1841,7 @@ struct AudioClipVisual
     bool isStretchActive = false;
     std::int64_t slipDeltaSamples = 0;
     bool isSlipActive = false;
+    ClipOverlapVisual overlap;
 };
 
 //==============================================================================
@@ -2234,7 +2281,200 @@ struct MidiClipVisual
     bool isStretchActive   = false;
     std::int64_t slipDeltaTicks = 0;
     bool isSlipActive      = false;
+    ClipOverlapVisual overlap;
 };
+
+
+/** Disegna l'indicazione grafica di Overlap o XFade dentro la clip superiore:
+    - Tratteggio diagonale nell'header della zona di overlap;
+    - Linea tratteggiata verticale con parentesi nel punto in cui finisce/inizia la clip nascosta sotto;
+    - In XFade (Audio/Image/Line): mostra la rampa di uscita della clip sottostante con punto e curve handle;
+    - In Overlap normale: mostra in ghost tratteggiato la curva coperta (e il gradino verticale per LineClip);
+    - In MIDI: mostra le note della clip sottostante (vuote tratteggiate in replace, colorate in merge). */
+inline void drawClipOverlapDecoration (
+    juce::Graphics& g,
+    const juce::Rectangle<float>& clipBounds,
+    const juce::Rectangle<float>& curveAreaBounds,
+    const ClipOverlapVisual& ov,
+    const bool isMidiClip = false,
+    const std::uint8_t displayMinPitch = 48,
+    const std::uint8_t displayMaxPitch = 72,
+    const bool isDrumMode = false,
+    const clip_midi_law::ZoomLod midiLod = clip_midi_law::ZoomLod::preview)
+{
+    if (! ov.hasOverlap || ! ov.isTopClip)
+        return;
+
+    namespace tk = ayra::tokens;
+
+    const float x0 = clipBounds.getX() + juce::jlimit (0.0f, 1.0f, ov.startNormX) * clipBounds.getWidth();
+    const float x1 = clipBounds.getX() + juce::jlimit (0.0f, 1.0f, ov.endNormX)   * clipBounds.getWidth();
+    if (x1 <= x0 + 1.5f)
+        return;
+
+    const juce::Rectangle<float> ovRect (x0, clipBounds.getY(), x1 - x0, clipBounds.getHeight());
+    const auto seamCol = ov.isCrossfade ? tk::accent() : ov.partnerTint.brighter (0.35f);
+
+    // 1. Wash traslucido sulla regione di overlap
+    g.setColour (seamCol.withAlpha (ov.isCrossfade ? 0.13f : 0.08f));
+    g.fillRect (ovRect);
+
+    // 2. Tratteggio diagonale nell'header della zona di overlap
+    const auto headerStrip = ovRect.withHeight (juce::jmin (clipTitleAreaHeight, ovRect.getHeight()));
+    {
+        const juce::Graphics::ScopedSaveState hatchScope (g);
+        g.reduceClipRegion (headerStrip.toNearestInt());
+        g.setColour (seamCol.withAlpha (0.30f));
+        for (float hx = headerStrip.getX() - headerStrip.getHeight(); hx < headerStrip.getRight(); hx += 6.5f)
+            g.drawLine (hx, headerStrip.getBottom(), hx + headerStrip.getHeight(), headerStrip.getY(), 1.1f);
+    }
+
+    // 3. Linea di confine della clip nascosta sotto
+    auto drawHiddenClipBoundary = [&] (float seamX, bool pointsInwardLeft)
+    {
+        g.setColour (seamCol.withAlpha (0.88f));
+        for (float cy = clipBounds.getY() + 2.0f; cy < clipBounds.getBottom() - 2.0f; cy += 6.0f)
+            g.drawVerticalLine (juce::roundToInt (seamX), cy, std::min (cy + 3.5f, clipBounds.getBottom() - 2.0f));
+
+        const float arm = pointsInwardLeft ? -4.5f : 4.5f;
+        g.drawLine (seamX, clipBounds.getY() + 1.5f, seamX + arm, clipBounds.getY() + 1.5f, 1.6f);
+        g.drawLine (seamX, clipBounds.getBottom() - 1.5f, seamX + arm, clipBounds.getBottom() - 1.5f, 1.6f);
+    };
+
+    if (ov.endNormX < 0.998f)
+        drawHiddenClipBoundary (x1, true);
+    if (ov.startNormX > 0.002f)
+        drawHiddenClipBoundary (x0, false);
+
+    // 4. Note della clip MIDI sottostante
+    if (isMidiClip && ov.partnerNotes != nullptr && ov.numPartnerNotes > 0)
+    {
+        for (int ni = 0; ni < ov.numPartnerNotes; ++ni)
+        {
+            const auto& pn = ov.partnerNotes[ni];
+            if (pn.endNormX < ov.startNormX || pn.startNormX > ov.endNormX)
+                continue;
+
+            const auto geom = computeMidiNoteGeometry (
+                pn, clipBounds, displayMinPitch, displayMaxPitch, isDrumMode, midiLod);
+            if (geom.bounds.isEmpty())
+                continue;
+
+            const auto clippedNote = geom.bounds.getIntersection (ovRect);
+            if (clippedNote.isEmpty())
+                continue;
+
+            const auto velCol = clip_midi_law::colourForVelocity (pn.velocity);
+            if (ov.midiMode == MidiOverlapMode::merge)
+            {
+                g.setColour (velCol.withAlpha (0.34f));
+                g.fillRoundedRectangle (clippedNote, 2.0f);
+                g.setColour (velCol.brighter (0.2f).withAlpha (0.72f));
+                g.drawRoundedRectangle (clippedNote, 2.0f, 0.9f);
+            }
+            else
+            {
+                juce::Path border;
+                border.addRoundedRectangle (clippedNote, 2.0f);
+                juce::Path dashed;
+                constexpr float dashes[] = { 3.0f, 2.5f };
+                juce::PathStrokeType (0.9f).createDashedStroke (dashed, border, dashes, 2);
+                g.setColour (velCol.withAlpha (0.38f));
+                g.fillPath (dashed);
+            }
+        }
+    }
+
+    // 5. Curva della clip sottostante (Rampa XFade oppure Curva Ghost in Overlap)
+    if (ov.showPartnerCurve && ! curveAreaBounds.isEmpty())
+    {
+        const float cx0 = curveAreaBounds.getX() + juce::jlimit (0.0f, 1.0f, ov.startNormX) * curveAreaBounds.getWidth();
+        const float cx1 = curveAreaBounds.getX() + juce::jlimit (0.0f, 1.0f, ov.endNormX)   * curveAreaBounds.getWidth();
+        const float py0 = curveAreaBounds.getBottom() - juce::jlimit (0.0f, 1.0f, ov.partnerStartNormY) * curveAreaBounds.getHeight();
+        const float py1 = curveAreaBounds.getBottom() - juce::jlimit (0.0f, 1.0f, ov.partnerEndNormY)   * curveAreaBounds.getHeight();
+
+        const auto seg = makeBoundedCurvePixelSegment (
+            { cx0, py0 }, { cx1, py1 }, ov.partnerCurveControl);
+
+        juce::Path partnerPath;
+        partnerPath.startNewSubPath (seg.start);
+        appendBoundedCurvePixelSegment (partnerPath, seg);
+
+        if (ov.isCrossfade)
+        {
+            g.setColour (juce::Colour (0x55000000));
+            g.strokePath (partnerPath, juce::PathStrokeType (4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.setColour (ov.partnerTint.brighter (0.45f).withAlpha (0.92f));
+            g.strokePath (partnerPath, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            const float hr = ov.partnerCurveHovered ? 4.5f : 3.5f;
+            const auto hCol = tk::accent().brighter (0.25f);
+            const juce::Rectangle<float> hDot (seg.control.x - hr, seg.control.y - hr, hr * 2.0f, hr * 2.0f);
+            if (ov.partnerCurveHovered)
+            {
+                g.setColour (hCol.withAlpha (0.35f));
+                g.fillEllipse (hDot.expanded (3.0f));
+                g.setColour (hCol);
+                g.fillEllipse (hDot);
+            }
+            g.setColour (hCol);
+            g.drawEllipse (hDot, 1.4f);
+
+            const float pr = (ov.partnerPointHovered || ov.partnerPointSelected) ? 5.5f : 4.0f;
+            const juce::Rectangle<float> pDot (cx0 - pr, py0 - pr, pr * 2.0f, pr * 2.0f);
+            g.setColour ((ov.partnerPointHovered || ov.partnerPointSelected) ? tk::accent() : ov.partnerTint.brighter (0.5f));
+            g.fillEllipse (pDot);
+            g.setColour (juce::Colours::white);
+            g.drawEllipse (pDot.reduced (0.5f), 1.2f);
+        }
+        else
+        {
+            juce::Path dashedPartner;
+            constexpr float dashes[] = { 4.0f, 3.0f };
+            juce::PathStrokeType (1.4f).createDashedStroke (dashedPartner, partnerPath, dashes, 2);
+            g.setColour (ov.partnerTint.brighter (0.35f).withAlpha (0.42f));
+            g.fillPath (dashedPartner);
+
+            if (ov.showStepJumpAtStart)
+            {
+                const float topStartY = curveAreaBounds.getBottom()
+                                      - juce::jlimit (0.0f, 1.0f, ov.topClipStartNormY) * curveAreaBounds.getHeight();
+                juce::Path jumpPath;
+                jumpPath.startNewSubPath (cx0, py0);
+                jumpPath.lineTo (cx0, topStartY);
+                juce::Path dashedJump;
+                juce::PathStrokeType (1.5f).createDashedStroke (dashedJump, jumpPath, dashes, 2);
+                g.setColour (juce::Colours::white.withAlpha (0.70f));
+                g.fillPath (dashedJump);
+            }
+        }
+    }
+
+    // 6. Badge compatto dello stato di Overlap ("XFADE" / "MERGE" / "OVERLAP")
+    if (ovRect.getWidth() >= 46.0f && clipBounds.getHeight() >= 40.0f)
+    {
+        const juce::String badgeText = ov.isCrossfade ? "XFADE"
+                                     : (isMidiClip && ov.midiMode == MidiOverlapMode::merge) ? "MERGE"
+                                     : "OVERLAP";
+        const juce::Colour badgeCol = ov.isCrossfade ? tk::accent()
+                                    : (isMidiClip && ov.midiMode == MidiOverlapMode::merge) ? tk::streamAudio()
+                                    : seamCol;
+
+        const float bw = juce::jmin (54.0f, ovRect.getWidth() - 6.0f);
+        const float bh = 13.0f;
+        const float bx = ovRect.getCentreX() - bw * 0.5f;
+        const float by = clipBounds.getY() + clipTitleAreaHeight + 3.0f;
+        const juce::Rectangle<float> pillRect (bx, by, bw, bh);
+
+        g.setColour (juce::Colour (0xd80b171e));
+        g.fillRoundedRectangle (pillRect, bh * 0.5f);
+        g.setColour (badgeCol.withAlpha (0.90f));
+        g.drawRoundedRectangle (pillRect, bh * 0.5f, 1.0f);
+        g.setColour (juce::Colours::white);
+        g.setFont (tk::type::caption().boldened().withHeight (8.5f));
+        g.drawText (badgeText, pillRect.toNearestInt(), juce::Justification::centred, false);
+    }
+}
 
 //==============================================================================
 // PROIEZIONI VISUALI LINE CLIP E LANE GLOBALI
@@ -2299,6 +2539,7 @@ struct LineClipVisual
     bool isStretchActive = false;
     std::int64_t slipDeltaTicks = 0;
     bool isSlipActive = false;
+    ClipOverlapVisual overlap;
 };
 
 struct KeyframeEventVisual

@@ -440,6 +440,137 @@ public:
     }
 
 private:
+
+    struct OverlapHitInfo
+    {
+        bool inOverlap = false;
+        bool inCrossfade = false;
+        std::string leftClipId;
+        std::string rightClipId;
+        double startSec = 0.0;
+        double endSec = 0.0;
+    };
+
+    [[nodiscard]] std::vector<const Clip*> getClipsSortedByZOrder() const
+    {
+        std::vector<const Clip*> sorted;
+        sorted.reserve (data.clips.size());
+        for (const auto& c : data.clips)
+            sorted.push_back (&c);
+        std::stable_sort (sorted.begin(), sorted.end(),
+                          [] (const Clip* a, const Clip* b) { return a->start < b->start; });
+        return sorted;
+    }
+
+    [[nodiscard]] OverlapHitInfo findOverlapAtTime (double timeSec, const std::string& refClipId = {}) const
+    {
+        const auto sorted = getClipsSortedByZOrder();
+        for (size_t i = 0; i + 1 < sorted.size(); ++i)
+        {
+            for (size_t j = i + 1; j < sorted.size(); ++j)
+            {
+                const auto* left = sorted[i];
+                const auto* right = sorted[j];
+                const double ovStart = std::max (left->start, right->start);
+                const double ovEnd   = std::min (left->start + left->length, right->start + right->length);
+                if (ovEnd > ovStart + 1.0e-3 && timeSec >= ovStart - 1.0e-3 && timeSec <= ovEnd + 1.0e-3)
+                {
+                    if (!refClipId.empty() && left->id != refClipId && right->id != refClipId)
+                        continue;
+                    return { true, xfadePairs.contains ({ left->id, right->id }),
+                             left->id, right->id, ovStart, ovEnd };
+                }
+            }
+        }
+        return {};
+    }
+
+    [[nodiscard]] OverlapHitInfo findOverlapForTopClip (const std::string& topClipId) const
+    {
+        const auto sorted = getClipsSortedByZOrder();
+        for (size_t i = 0; i + 1 < sorted.size(); ++i)
+        {
+            for (size_t j = i + 1; j < sorted.size(); ++j)
+            {
+                const auto* left = sorted[i];
+                const auto* right = sorted[j];
+                if (right->id != topClipId)
+                    continue;
+                const double ovStart = std::max (left->start, right->start);
+                const double ovEnd   = std::min (left->start + left->length, right->start + right->length);
+                if (ovEnd > ovStart + 1.0e-3)
+                    return { true, xfadePairs.contains ({ left->id, right->id }),
+                             left->id, right->id, ovStart, ovEnd };
+            }
+        }
+        return {};
+    }
+
+    void syncActiveLineCrossfades (const std::string& modifiedClipId = {})
+    {
+        const auto sorted = getClipsSortedByZOrder();
+        std::set<std::pair<std::string, std::string>> validPairs;
+
+        for (size_t i = 0; i + 1 < sorted.size(); ++i)
+        {
+            for (size_t j = i + 1; j < sorted.size(); ++j)
+            {
+                const auto* left = sorted[i];
+                const auto* right = sorted[j];
+                const double ovStart = std::max (left->start, right->start);
+                const double ovEnd   = std::min (left->start + left->length, right->start + right->length);
+                const std::pair<std::string, std::string> key { left->id, right->id };
+
+                if (ovEnd > ovStart + 0.01 && xfadePairs.contains (key))
+                {
+                    validPairs.insert (key);
+                    if (!uiStates.contains (left->id) || !uiStates.contains (right->id))
+                        continue;
+
+                    auto& leftUi  = uiStates[left->id];
+                    auto& rightUi = uiStates[right->id];
+                    if (leftUi.points.size() < 2 || rightUi.points.size() < 2)
+                        continue;
+
+                    leftUi.boundary.mode  = ayra::curves::CurveBoundaryMode::fadeEndpoints;
+                    rightUi.boundary.mode = ayra::curves::CurveBoundaryMode::fadeEndpoints;
+
+                    const float leftMinX  = leftUi.points.size() > 2 ? (leftUi.points[leftUi.points.size() - 2].normX + 0.01f) : 0.02f;
+                    const float rightMaxX = rightUi.points.size() > 2 ? (rightUi.points[1].normX - 0.01f) : 0.98f;
+
+                    leftUi.points.back().normX   = juce::jlimit (leftMinX, 0.99f, static_cast<float> ((ovStart - left->start) / std::max (0.05, left->length)));
+                    rightUi.points.front().normX = juce::jlimit (0.01f, rightMaxX, static_cast<float> ((ovEnd - right->start) / std::max (0.05, right->length)));
+
+                    leftUi.boundary.endValue    = rightUi.points.front().normValue;
+                    rightUi.boundary.startValue = leftUi.points.back().normValue;
+
+                    if (modifiedClipId == left->id)
+                        rightUi.boundary.fadeInControl = leftUi.boundary.fadeOutControl;
+                    else if (modifiedClipId == right->id)
+                        leftUi.boundary.fadeOutControl = rightUi.boundary.fadeInControl;
+                }
+            }
+        }
+
+        for (const auto& oldPair : xfadePairs)
+        {
+            if (!validPairs.contains (oldPair))
+            {
+                if (uiStates.contains (oldPair.first) && !uiStates[oldPair.first].points.empty())
+                {
+                    uiStates[oldPair.first].boundary.mode = ayra::curves::CurveBoundaryMode::pinnedEndpoints;
+                    uiStates[oldPair.first].points.back().normX = 1.0f;
+                }
+                if (uiStates.contains (oldPair.second) && !uiStates[oldPair.second].points.empty())
+                {
+                    uiStates[oldPair.second].boundary.mode = ayra::curves::CurveBoundaryMode::pinnedEndpoints;
+                    uiStates[oldPair.second].points.front().normX = 0.0f;
+                }
+            }
+        }
+        xfadePairs = std::move (validPairs);
+    }
+
     [[nodiscard]] LineClipVisual makeLineClipVisual (
         const std::string& clipId,
         const juce::Rectangle<float> localBodyBounds,
@@ -517,6 +648,33 @@ private:
             visual.isDraggingAllPoints     = false;
         }
 
+        const auto ovInfo = findOverlapForTopClip (clipId);
+        if (ovInfo.inOverlap && clip->length > 0.001)
+        {
+            visual.overlap.hasOverlap  = true;
+            visual.overlap.isCrossfade = ovInfo.inCrossfade;
+            visual.overlap.isTopClip   = true;
+            visual.overlap.startNormX  = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.startSec - clip->start) / clip->length));
+            visual.overlap.endNormX    = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.endSec - clip->start) / clip->length));
+            visual.overlap.partnerTint = visual.tint;
+
+            const auto leftClipIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                  [&ovInfo] (const Clip& c) { return c.id == ovInfo.leftClipId; });
+            if (leftClipIt != data.clips.end() && uiStates.contains (ovInfo.leftClipId) && leftClipIt->length > 0.001)
+            {
+                const auto& leftUi = uiStates.at (ovInfo.leftClipId);
+                const float leftNorm0 = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.startSec - leftClipIt->start) / leftClipIt->length));
+                const float leftNorm1 = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.endSec - leftClipIt->start) / leftClipIt->length));
+                visual.overlap.showPartnerCurve  = !ovInfo.inCrossfade;
+                visual.overlap.partnerStartNormY = clips::evaluateAutomationCurveAt (
+                    leftUi.points.data(), static_cast<int> (leftUi.points.size()), leftUi.defaultNormValue, leftUi.boundary, leftNorm0);
+                visual.overlap.partnerEndNormY   = clips::evaluateAutomationCurveAt (
+                    leftUi.points.data(), static_cast<int> (leftUi.points.size()), leftUi.defaultNormValue, leftUi.boundary, leftNorm1);
+                visual.overlap.showStepJumpAtStart = !ovInfo.inCrossfade;
+                visual.overlap.topClipStartNormY   = ui.points.empty() ? ui.defaultNormValue : ui.points.front().normValue;
+            }
+        }
+
         return visual;
     }
 
@@ -529,11 +687,14 @@ private:
         const float topOverflow    = clipFeatures.warpEnabled ? 8.0f : 0.0f;
         const float bottomOverflow = clipFeatures.cutEnabled  ? 6.0f : 0.0f;
 
-        for (const auto& clip : data.clips)
+        syncActiveLineCrossfades (draggedClipId);
+        for (const auto* clipPtr : getClipsSortedByZOrder())
         {
+            const auto& clip = *clipPtr;
             if (const auto component = clipComponents.find (clip.id);
                 component != clipComponents.end())
             {
+                component->second->toFront (false);
                 component->second->setDecorationOverflows (topOverflow, bottomOverflow, 7.0f);
                 component->second->setBodyBoundsInParent (clipBounds (clip, pixelsPerSecond));
             }
@@ -562,9 +723,10 @@ private:
                                      activeZone == TimelineClipZone::fadeOutCurveHandle ||
                                      activeZone == TimelineClipZone::gainPointDashedLine);
 
-        for (auto it = data.clips.rbegin(); it != data.clips.rend(); ++it)
+        const auto sortedClips = getClipsSortedByZOrder();
+        for (auto it = sortedClips.rbegin(); it != sortedClips.rend(); ++it)
         {
-            const auto& c = *it;
+            const auto& c = **it;
             const auto b = clipBounds (c, pps);
             const auto feat = computeClipFeaturesLOD (clipFeatures, b.getHeight(), isDraggingWarp, isDraggingEnv);
 
@@ -841,6 +1003,15 @@ private:
             context.markerIndex = hit.markerIdx;
             context.pointIndex = hit.pointIdx;
             context.segmentIndex = hit.curveSegmentIdx;
+            const auto ovInfo = findOverlapAtTime (context.timelineSeconds, hit.clip->id);
+            if (ovInfo.inOverlap)
+            {
+                context.isInClipOverlap = true;
+                context.isInCrossfade = ovInfo.inCrossfade;
+                context.overlappedPartnerClipId = (ovInfo.leftClipId == hit.clip->id) ? ovInfo.rightClipId : ovInfo.leftClipId;
+                context.overlapStartSeconds = ovInfo.startSec;
+                context.overlapEndSeconds = ovInfo.endSec;
+            }
             host.requestTimelineContextMenu(context);
             return;
         }
@@ -958,16 +1129,23 @@ private:
         {
             const auto pps = getWidth() / 32.0;
             const double splitTime = e.position.x / pps;
-            const double relativeSplit = splitTime - hit.clip->start;
             constexpr double minimumSegmentLength = 0.2;
-            if (relativeSplit > minimumSegmentLength && relativeSplit < hit.clip->length - minimumSegmentLength)
+            std::vector<std::pair<std::string, float>> clipsToSplit;
+            for (const auto& candidate : data.clips)
             {
-                const float splitFrac = static_cast<float> (relativeSplit / hit.clip->length);
-                const auto newId = host.splitClip (data.id, hit.clip->id, splitTime);
-                if (!newId.empty())
-                    splitLineClipUI (hit.clip->id, newId, splitFrac);
+                const double rel = splitTime - candidate.start;
+                if (rel > minimumSegmentLength && rel < candidate.length - minimumSegmentLength)
+                    clipsToSplit.emplace_back (candidate.id, static_cast<float> (rel / candidate.length));
             }
+            for (const auto& [targetId, splitFrac] : clipsToSplit)
+            {
+                const auto newId = host.splitClip (data.id, targetId, splitTime);
+                if (!newId.empty())
+                    splitLineClipUI (targetId, newId, splitFrac);
+            }
+            syncActiveLineCrossfades();
             resetDragState();
+            repaint();
             return;
         }
 
@@ -1566,6 +1744,20 @@ private:
         if (hit.clip == nullptr) return;
         auto& ui = uiStates[hit.clip->id];
 
+        const double clickSec = clips::timelineSecondsFromCanvasX (e.position.x, getWidth());
+        const auto ovInfo = findOverlapAtTime (clickSec, hit.clip->id);
+        if (ovInfo.inOverlap && hit.zone == TimelineClipZone::none)
+        {
+            const std::pair<std::string, std::string> pairKey { ovInfo.leftClipId, ovInfo.rightClipId };
+            if (xfadePairs.contains (pairKey))
+                xfadePairs.erase (pairKey);
+            else
+                xfadePairs.insert (pairKey);
+            syncActiveLineCrossfades();
+            repaint();
+            return;
+        }
+
         if (hit.zone == TimelineClipZone::edgeLeftStretch || hit.zone == TimelineClipZone::edgeRightStretch)
         {
             if (ui.origClipLength > 0.125)
@@ -1666,6 +1858,7 @@ private:
     bool programAudible = true;
 
     std::map<std::string, LineClipUIState> uiStates;
+    std::set<std::pair<std::string, std::string>> xfadePairs;
     std::map<std::string, std::unique_ptr<LineClipComponent>> clipComponents;
 
     ayra::MarqueeSelector marqueeSelector { *this };

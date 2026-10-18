@@ -234,6 +234,7 @@ struct ImageClipVisual
     bool isStretchActive = false;
     std::int64_t slipDeltaFrames = 0;
     bool isSlipActive = false;
+    ClipOverlapVisual overlap;
 };
 
 } // namespace ayra::lab::clips

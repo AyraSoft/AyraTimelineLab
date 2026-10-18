@@ -77,6 +77,7 @@ struct MidiClipUIState
 
     // Cache visuale rigenerata per il paint a 0 allocazioni durante il frame
     std::vector<MidiNoteVisual> cachedVisualNotes;
+    std::vector<MidiNoteVisual> cachedPartnerOverlapNotes;
     std::vector<MidiProgramChangeVisual> cachedVisualPcs;
     std::vector<juce::Path> cachedGhostPaths;
     std::vector<MidiCcGhostLaneVisual> cachedGhostVisuals;
@@ -798,6 +799,17 @@ public:
         repaint();
     }
 
+    void setMidiOverlapMode (const clips::MidiOverlapMode mode)
+    {
+        if (midiOverlapMode != mode)
+        {
+            midiOverlapMode = mode;
+            layoutClipComponents();
+            repaint();
+        }
+    }
+    [[nodiscard]] clips::MidiOverlapMode getMidiOverlapMode() const noexcept { return midiOverlapMode; }
+
     void setWarpFeatureEnabled (const bool enabled)
     {
         if (clipFeatures.warpEnabled != enabled)
@@ -878,6 +890,88 @@ public:
     }
 
 private:
+
+    struct OverlapHitInfo
+    {
+        bool inOverlap = false;
+        std::string bottomClipId;
+        std::string topClipId;
+        double startSec = 0.0;
+        double endSec = 0.0;
+    };
+
+    [[nodiscard]] std::vector<const Clip*> getClipsSortedByZOrder() const
+    {
+        std::vector<const Clip*> sorted;
+        sorted.reserve (data.clips.size());
+        for (const auto& c : data.clips)
+            sorted.push_back (&c);
+
+        // Di base vince sempre la clip successiva (start maggiore)
+        std::stable_sort (sorted.begin(), sorted.end(),
+                          [] (const Clip* a, const Clip* b) { return a->start < b->start; });
+
+        // In modalita' MERGE, la clip sopra l'altra (ed editabile nel range di overlap)
+        // e' l'ultima selezionata!
+        if (midiOverlapMode == clips::MidiOverlapMode::merge)
+        {
+            const std::string& activeSelectedId = !lastSelectedClipId.empty()
+                                                ? lastSelectedClipId
+                                                : host.store().state().selectedClip;
+            auto it = std::find_if (sorted.begin(), sorted.end(),
+                                    [&activeSelectedId] (const Clip* c) { return c->id == activeSelectedId; });
+            if (it != sorted.end())
+            {
+                const Clip* topClip = *it;
+                sorted.erase (it);
+                sorted.push_back (topClip);
+            }
+        }
+        return sorted;
+    }
+
+    [[nodiscard]] OverlapHitInfo findOverlapAtTime (double timeSec, const std::string& refClipId = {}) const
+    {
+        const auto sorted = getClipsSortedByZOrder();
+        for (size_t i = 0; i + 1 < sorted.size(); ++i)
+        {
+            for (size_t j = i + 1; j < sorted.size(); ++j)
+            {
+                const auto* bottom = sorted[i];
+                const auto* top    = sorted[j];
+                const double ovStart = std::max (bottom->start, top->start);
+                const double ovEnd   = std::min (bottom->start + bottom->length, top->start + top->length);
+                if (ovEnd > ovStart + 1.0e-3 && timeSec >= ovStart - 1.0e-3 && timeSec <= ovEnd + 1.0e-3)
+                {
+                    if (!refClipId.empty() && bottom->id != refClipId && top->id != refClipId)
+                        continue;
+                    return { true, bottom->id, top->id, ovStart, ovEnd };
+                }
+            }
+        }
+        return {};
+    }
+
+    [[nodiscard]] OverlapHitInfo findOverlapForTopClip (const std::string& topClipId) const
+    {
+        const auto sorted = getClipsSortedByZOrder();
+        for (size_t i = 0; i + 1 < sorted.size(); ++i)
+        {
+            for (size_t j = i + 1; j < sorted.size(); ++j)
+            {
+                const auto* bottom = sorted[i];
+                const auto* top    = sorted[j];
+                if (top->id != topClipId)
+                    continue;
+                const double ovStart = std::max (bottom->start, top->start);
+                const double ovEnd   = std::min (bottom->start + bottom->length, top->start + top->length);
+                if (ovEnd > ovStart + 1.0e-3)
+                    return { true, bottom->id, top->id, ovStart, ovEnd };
+            }
+        }
+        return {};
+    }
+
     MidiClipVisual makeMidiClipVisual (
         const std::string& clipId,
         const juce::Rectangle<float> localBodyBounds,
@@ -973,6 +1067,41 @@ private:
             visual.isDraggingAllEnvelope   = false;
         }
 
+        const auto ovInfo = findOverlapForTopClip (clipId);
+        if (ovInfo.inOverlap && clip->length > 0.001)
+        {
+            visual.overlap.hasOverlap  = true;
+            visual.overlap.isCrossfade = false;
+            visual.overlap.isTopClip   = true;
+            visual.overlap.midiMode    = midiOverlapMode;
+            visual.overlap.startNormX  = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.startSec - clip->start) / clip->length));
+            visual.overlap.endNormX    = juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.endSec - clip->start) / clip->length));
+            visual.overlap.partnerTint = visual.tint;
+
+            const auto botClipIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                 [&ovInfo] (const Clip& c) { return c.id == ovInfo.bottomClipId; });
+            if (botClipIt != data.clips.end() && uiStates.contains (ovInfo.bottomClipId) && botClipIt->length > 0.001)
+            {
+                const auto& botUi = uiStates.at (ovInfo.bottomClipId);
+                ui.cachedPartnerOverlapNotes.clear();
+                for (const auto& bn : botUi.cachedVisualNotes)
+                {
+                    const double absNoteStart = botClipIt->start + static_cast<double> (bn.startNormX) * botClipIt->length;
+                    const double absNoteEnd   = botClipIt->start + static_cast<double> (bn.endNormX)   * botClipIt->length;
+                    if (absNoteEnd <= ovInfo.startSec || absNoteStart >= ovInfo.endSec)
+                        continue;
+
+                    MidiNoteVisual projected = bn;
+                    projected.startNormX = static_cast<float> ((absNoteStart - clip->start) / clip->length);
+                    projected.endNormX   = static_cast<float> ((absNoteEnd   - clip->start) / clip->length);
+                    projected.selected   = false;
+                    ui.cachedPartnerOverlapNotes.push_back (projected);
+                }
+                visual.overlap.partnerNotes    = ui.cachedPartnerOverlapNotes.data();
+                visual.overlap.numPartnerNotes = static_cast<int> (ui.cachedPartnerOverlapNotes.size());
+            }
+        }
+
         return visual;
     }
 
@@ -985,11 +1114,13 @@ private:
         const float topOverflow    = clipFeatures.warpEnabled ? 8.0f : 0.0f;
         const float bottomOverflow = clipFeatures.cutEnabled  ? 6.0f : 0.0f;
 
-        for (const auto& clip : data.clips)
+        for (const auto* clipPtr : getClipsSortedByZOrder())
         {
+            const auto& clip = *clipPtr;
             if (const auto component = clipComponents.find (clip.id);
                 component != clipComponents.end())
             {
+                component->second->toFront (false);
                 component->second->setDecorationOverflows (topOverflow, bottomOverflow, 16.0f);
                 component->second->setBodyBoundsInParent (clipBounds (clip, pixelsPerSecond));
             }
@@ -1015,9 +1146,10 @@ private:
         const bool isDraggingWarp = (activeZone == TimelineClipZone::warpMarker || activeZone == TimelineClipZone::topWarpRail);
         const bool isDraggingEnv  = false;
 
-        for (auto it = data.clips.rbegin(); it != data.clips.rend(); ++it)
+        const auto sortedClips = getClipsSortedByZOrder();
+        for (auto it = sortedClips.rbegin(); it != sortedClips.rend(); ++it)
         {
-            const auto& c = *it;
+            const auto& c = **it;
             const auto b = clipBounds (c, pps);
             const auto feat = computeClipFeaturesLOD (clipFeatures, b.getHeight(), isDraggingWarp, isDraggingEnv);
 
@@ -1314,6 +1446,16 @@ private:
             context.segmentIndex = hit.curveSegmentIdx;
             context.noteIndex = hit.noteIdx;
             context.eventIndex = hit.pcIdx;
+            const auto ovInfo = findOverlapAtTime (context.timelineSeconds, hit.clip->id);
+            context.midiOverlapMode = midiOverlapMode;
+            if (ovInfo.inOverlap)
+            {
+                context.isInClipOverlap = true;
+                context.isInCrossfade = false;
+                context.overlappedPartnerClipId = (ovInfo.bottomClipId == hit.clip->id) ? ovInfo.topClipId : ovInfo.bottomClipId;
+                context.overlapStartSeconds = ovInfo.startSec;
+                context.overlapEndSeconds = ovInfo.endSec;
+            }
             host.requestTimelineContextMenu(context);
             return;
         }
@@ -1339,7 +1481,9 @@ private:
             return;
         }
 
+        lastSelectedClipId = hit.clip->id;
         host.selectClip (hit.clip->id);
+        layoutClipComponents();
         grabKeyboardFocus();
 
         auto& ui = uiStates[hit.clip->id];
@@ -1536,21 +1680,26 @@ private:
         {
             const auto pps = getWidth() / 32.0;
             const double splitTime = e.position.x / pps;
-            const double relativeSplit = splitTime - hit.clip->start;
             constexpr double minimumSegmentLength = 0.2;
-            if (!(relativeSplit > minimumSegmentLength
-                  && relativeSplit < hit.clip->length - minimumSegmentLength))
+            std::vector<std::pair<std::string, float>> clipsToSplit;
+            for (const auto& candidate : data.clips)
             {
-                resetDragState();
-                repaint();
-                return;
+                const double rel = splitTime - candidate.start;
+                if (rel > minimumSegmentLength && rel < candidate.length - minimumSegmentLength)
+                    clipsToSplit.emplace_back (candidate.id, static_cast<float> (rel / candidate.length));
             }
-            const float splitFrac = static_cast<float> ((splitTime - hit.clip->start) / hit.clip->length);
-
-            const auto newId = host.splitClip (data.id, hit.clip->id, splitTime);
-            if (!newId.empty())
-                splitMidiClipUI (hit.clip->id, newId, splitFrac, e.mods.isAltDown());
+            for (const auto& [targetId, splitFrac] : clipsToSplit)
+            {
+                const auto newId = host.splitClip (data.id, targetId, splitTime);
+                if (!newId.empty())
+                {
+                    splitMidiClipUI (targetId, newId, splitFrac, e.mods.isAltDown());
+                    updateMidiClip (targetId);
+                    updateMidiClip (newId);
+                }
+            }
             resetDragState();
+            repaint();
             return;
         }
 
@@ -2381,6 +2530,8 @@ private:
     bool programAudible = true;
 
     std::map<std::string, MidiClipUIState> uiStates;
+    clips::MidiOverlapMode midiOverlapMode = clips::MidiOverlapMode::replace;
+    std::string lastSelectedClipId;
     std::map<std::string, std::unique_ptr<MidiClipComponent>> clipComponents;
 
     ayra::MarqueeSelector marqueeSelector { *this };

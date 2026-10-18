@@ -316,6 +316,8 @@ void ClipDefaultLookAndFeel::drawImageClip (
             }
         }
 
+        drawClipOverlapDecoration (g, v.bounds, curveBounds, v.overlap);
+
         // 5. Linea dell'Opacita' continua (0% .. 100%) — visibile a zoom medio e grande (showGainEnvelope)
         //    ZERO allocazioni heap durante il paint (buffer inline su stack).
         if (v.features.showGainEnvelope)
