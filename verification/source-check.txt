@@ -1,0 +1,2 @@
+Generated sources: OK
+PASS: source completeness, deterministic fixtures and standalone HTML resources

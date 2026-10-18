@@ -1,0 +1,8 @@
+Preset CMake variables:
+
+  AYRA_LAB_BUILD_GUI="OFF"
+  CMAKE_BUILD_TYPE="Debug"
+
+-- Configuring done (4.7s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/AyraTimelineLab/build/core

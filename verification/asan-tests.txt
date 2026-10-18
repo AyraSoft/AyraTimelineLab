@@ -1,0 +1,11 @@
+Internal ctest changing into directory: /mnt/data/AyraTimelineLab/build/asan
+Test project /mnt/data/AyraTimelineLab/build/asan
+    Start 1: core_regressions
+1/2 Test #1: core_regressions .................   Passed    0.03 sec
+    Start 2: fixture_sources
+2/2 Test #2: fixture_sources ..................   Passed    0.85 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.88 sec
+PASS: 184 core assertions

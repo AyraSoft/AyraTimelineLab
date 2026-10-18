@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ayra · Timeline Header Lab</title>
+<style>/*__THEME__*/
+/*__CSS__*/</style></head>
+<body>
+<header class="appbar"><div class="brand"><span class="brand-mark">A<span>·</span></span><div><strong>AYRA <span>MULTIVERSE</span></strong><small>TIMELINE LAB / HEADER & TRACK MODEL</small></div></div><div class="app-context">NEON <span>/</span> una Song, quattro ruoli</div><div class="app-actions"><span class="lab-tag">BANCO DI TEST</span><button id="theme" title="Cambia tema">Tema chiaro</button><button id="save" class="primary">Salva ▾</button></div></header>
+<nav class="toolbar"><div class="segmented" aria-label="Modalità ordine"><button id="grouped">Raggruppata</button><button id="free">Libera</button></div><span id="mode-hint" class="hint"></span><div class="spacer"></div><button id="undo" title="Ctrl/Cmd + Z">↶</button><button id="redo" title="Ctrl/Cmd + Shift + Z">↷</button><label class="width-control">Header <input id="width" type="range" min="320" max="480" step="1"><output id="width-value"></output></label><button id="gallery-toggle">Confronta header</button><button id="mixer-toggle">Mixer</button><button id="reset">Ripristina</button></nav>
+<section class="workspace"><div class="main-area"><div class="arranger" id="arranger" aria-label="Timeline dimostrativa"></div><section class="mixer" id="mixer"><div class="mixer-heading"><strong>MIXER</strong><span>Stesse entità · stesso ordine · stessa selezione</span></div><div id="mixer-strips"></div></section></div><aside id="inspector" class="inspector" aria-label="Inspector del Tensor"></aside></section>
+<footer class="status"><span class="status-dot"></span><span id="status" role="status" aria-live="polite">Fixture caricata. Seleziona un header per iniziare.</span><div class="spacer"></div><span>NO AUDIO / NO DSP / DATI DIMOSTRATIVI</span><button id="help">?</button></footer>
+<dialog id="dialog"><div class="dialog-head"><div><small id="dialog-eyebrow">AYRA / LAB</small><h2 id="dialog-title"></h2></div><button id="dialog-close" aria-label="Chiudi">×</button></div><div id="dialog-body"></div></dialog>
+<input type="file" id="import-file" accept="application/json,.json" hidden>
+<script type="application/json" id="lab-state">/*__SESSION__*/</script>
+<script>/*__JS__*/</script></body></html>

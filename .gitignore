@@ -1,0 +1,164 @@
+# ==============================================================================
+# Ayra Ecosystem — .gitignore for AyraTimelineLab
+# ==============================================================================
+
+# --- OS / File System Metadata ---
+.DS_Store
+**/.DS_Store
+.DS_Store?
+._*
+**._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+.TemporaryItems
+.DocumentRevisions-V100
+.fseventsd
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+
+# --- IDEs, Editors & Language Servers ---
+.vscode/
+*.code-workspace
+.vs/
+.idea/
+.zcode/
+.ccls-cache/
+**/.ccls-cache/
+.clangd/
+**/.clangd/
+.cache/
+**/.cache/
+compile_commands.json
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+*.orig
+*.sublime-project
+*.sublime-workspace
+
+# --- Xcode & Projucer User Data ---
+xcuserdata/
+**/xcuserdata/
+*.xcuserdatad
+*.xcuserstate
+*.xcdebugger/
+*.xccheckout
+*.xcscmblueprint
+*.moved-aside
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+DerivedData/
+**/DerivedData/
+*.hmap
+*.ipa
+
+# --- Build Directories & Outputs ---
+build/
+Build/
+build-*/
+cmake-build-*/
+out/
+bin/
+temp/
+
+# --- Projucer & JUCE Generated ---
+Builds/
+**/Builds/
+JuceLibraryCode/
+**/JuceLibraryCode/
+**/Builds/MacOSX/build/
+**/Builds/MacOSX/*.nib
+**/Builds/VisualStudio*/x64/
+**/Builds/VisualStudio*/Win32/
+**/Builds/LinuxMakefile/build/
+juce_*.dat
+
+# --- CMake Generated & User Presets ---
+CMakeFiles/
+CMakeCache.txt
+CMakeScripts/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+CMakeUserPresets.json
+_deps/
+
+# --- Compiled Objects, Libraries & Binaries ---
+*.o
+*.obj
+*.slo
+*.lo
+*.d
+*.a
+*.lib
+*.lai
+*.la
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.dSYM/
+*.ilk
+*.exp
+*.pdb
+*.idb
+*.dwo
+*.gch
+*.pch
+
+# --- Audio Plugin Bundles (Compiled Outputs) ---
+*.vst
+*.vst3
+*.component
+*.aaxplugin
+*.appex
+
+# --- Logs, Test & Coverage Artifacts ---
+*.log
+*.sum
+*.xml
+Testing/
+coverage/
+*.gcov
+*.gcda
+*.gcno
+
+# --- Python Cache & Environments ---
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+**/.ruff_cache/
+.venv/
+venv/
+ENV/
+env/
+
+# --- Node / Web Artifacts ---
+node_modules/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

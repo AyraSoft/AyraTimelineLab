@@ -1,0 +1,5 @@
+-- Configuring done (5.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/AyraTimelineLab/build/asan
+[ 60%] Built target ayra_lab_core
+[100%] Built target ayra_lab_tests

@@ -1,0 +1,12 @@
+#include "ayra_clips.h"
+
+#include "component/ayra_ClipComponent.cpp"
+#include "audio/ayra_AudioClipComponent.cpp"
+#include "midi/ayra_MidiClipComponent.cpp"
+#include "line/ayra_LineClipComponent.cpp"
+#include "keyframe/ayra_KeyframeLaneComponent.cpp"
+#include "continous/ayra_ContinuousLineComponent.cpp"
+#include "image/ayra_ImageClipComponent.cpp"
+#include "look_and_feel/ayra_ClipLookAndFeelMethods.cpp"
+#include "look_and_feel/ayra_ClipDefaultLookAndFeel.cpp"
+#include "look_and_feel/ayra_ClipDefaultLookAndFeel_Image.cpp"

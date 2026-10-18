@@ -1,0 +1,6 @@
+{
+  "source": {"repository":"AyraSoft/ayra_multiverse","commit":"5db35b89ddb73da6da2c5b6d3184f5a3878bda1b","path":"modules/look_and_feel/tokens/ayra_Tokens_Colours.h","blob":"55d6c4a2277c24b01b75d4d047aa2deb0c9096d8","note":"Snapshot dimostrativo dei token letti, non un nuovo owner del tema di produzione."},
+  "dark":{"base":"#1B1F26","top":"#20252E","bottom":"#161A20","raised":"#272D37","recessed":"#12151A","border":"#3A434F","text":"#EDF1F7","secondary":"#9AA6B5","disabled":"#5C6675","value":"#BFE0FF"},
+  "light":{"base":"#E7ECF2","top":"#EEF1F5","bottom":"#E2E7EE","raised":"#F4F7FB","recessed":"#DDE3EB","border":"#C9D2DD","text":"#1C2530","secondary":"#5A6675","disabled":"#A4AEBB","value":"#11324A"},
+  "semantic":{"accent":"#FF7A1A","mute":"#E8B400","solo":"#F03C3C","play":"#4FB56E","audio":"#16C95C","midi":"#F03C3C","osc":"#4664E6","dmx":"#A84FD6"}
+}

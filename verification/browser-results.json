@@ -1,0 +1,193 @@
+{
+  "checks": 47,
+  "results": [
+    {
+      "test": "Four role headers",
+      "passed": true
+    },
+    {
+      "test": "No invented Solo on Song Main",
+      "passed": true
+    },
+    {
+      "test": "Six non-reorderable global lanes",
+      "passed": true
+    },
+    {
+      "test": "Stereo drawn in four positions",
+      "passed": true
+    },
+    {
+      "test": "Two empty positions preserved",
+      "passed": true
+    },
+    {
+      "test": "Header selection distinct from clip selection",
+      "passed": true
+    },
+    {
+      "test": "Header click does not select clips",
+      "passed": true
+    },
+    {
+      "test": "Ctrl multiselection",
+      "passed": true
+    },
+    {
+      "test": "Shift range uses visible order",
+      "passed": true
+    },
+    {
+      "test": "Header mute writes shared fixture state",
+      "passed": true
+    },
+    {
+      "test": "Mixer follows header mute",
+      "passed": true
+    },
+    {
+      "test": "Mute and solo exclusion",
+      "passed": true
+    },
+    {
+      "test": "Right-click does not toggle mute",
+      "passed": true
+    },
+    {
+      "test": "Program mute does not mutate child mute",
+      "passed": true
+    },
+    {
+      "test": "Program versus Cue distinction",
+      "passed": true
+    },
+    {
+      "test": "Resize commits new height",
+      "passed": true
+    },
+    {
+      "test": "Resize one-step Undo",
+      "passed": true
+    },
+    {
+      "test": "Escape cancels resize without commit",
+      "passed": true
+    },
+    {
+      "test": "Expansion exposes 3 MIDI pins, OSC, automation context",
+      "passed": true
+    },
+    {
+      "test": "Expand does not change mapping",
+      "passed": true
+    },
+    {
+      "test": "Real DOM drag-and-drop through grip",
+      "passed": true
+    },
+    {
+      "test": "Free mode enables grip",
+      "passed": true
+    },
+    {
+      "test": "Pinned main protected",
+      "passed": true
+    },
+    {
+      "test": "Identity-based reorder",
+      "passed": true
+    },
+    {
+      "test": "Stable block reorder",
+      "passed": true
+    },
+    {
+      "test": "Reorder leaves clips routing and colour untouched",
+      "passed": true
+    },
+    {
+      "test": "Mode toggles preserve manual order",
+      "passed": true
+    },
+    {
+      "test": "Mixer and timeline same order",
+      "passed": true
+    },
+    {
+      "test": "Unpinned main movable",
+      "passed": true
+    },
+    {
+      "test": "Double click opens clip editor with mapping entry",
+      "passed": true
+    },
+    {
+      "test": "Mapping is one list of N positions",
+      "passed": true
+    },
+    {
+      "test": "Mapping names empty positions",
+      "passed": true
+    },
+    {
+      "test": "Mapping draft not yet committed",
+      "passed": true
+    },
+    {
+      "test": "Mapping applied track-wide",
+      "passed": true
+    },
+    {
+      "test": "Mapping does not modify source file data",
+      "passed": true
+    },
+    {
+      "test": "Mapping one-step Undo",
+      "passed": true
+    },
+    {
+      "test": "Graph opens explicit fixture chain",
+      "passed": true
+    },
+    {
+      "test": "Routing labelled read-only fixture",
+      "passed": true
+    },
+    {
+      "test": "Automation inventory fixture edit",
+      "passed": true
+    },
+    {
+      "test": "Light theme",
+      "passed": true
+    },
+    {
+      "test": "Four-role gallery toggle",
+      "passed": true
+    },
+    {
+      "test": "Reject malformed order",
+      "passed": true
+    },
+    {
+      "test": "Reject malformed channel mapping",
+      "passed": true
+    },
+    {
+      "test": "Reject non-Lab schema",
+      "passed": true
+    },
+    {
+      "test": "HTML export reloads edited state",
+      "passed": true
+    },
+    {
+      "test": "Narrow viewport still presents all entities",
+      "passed": true
+    },
+    {
+      "test": "No browser runtime exceptions",
+      "passed": true
+    }
+  ]
+}

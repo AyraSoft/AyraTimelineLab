@@ -1,0 +1,3 @@
+:root{--base:#1B1F26;--top:#20252E;--bottom:#161A20;--raised:#272D37;--recessed:#12151A;--border:#3A434F;--text:#EDF1F7;--secondary:#9AA6B5;--disabled:#5C6675;--value:#BFE0FF;}
+body.light{--base:#E7ECF2;--top:#EEF1F5;--bottom:#E2E7EE;--raised:#F4F7FB;--recessed:#DDE3EB;--border:#C9D2DD;--text:#1C2530;--secondary:#5A6675;--disabled:#A4AEBB;--value:#11324A;}
+:root{--accent:#FF7A1A;--mute:#E8B400;--solo:#F03C3C;--play:#4FB56E;--audio:#16C95C;--midi:#F03C3C;--osc:#4664E6;--dmx:#A84FD6;}

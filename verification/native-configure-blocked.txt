@@ -1,0 +1,13 @@
+-- The CXX compiler identification is GNU 14.2.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+CMake Error at CMakeLists.txt:47 (message):
+  Set -DJUCE_SOURCE_DIR=/path/to/JUCE, or explicitly
+  -DAYRA_LAB_FETCH_JUCE=ON.  Core tests: -DAYRA_LAB_BUILD_GUI=OFF
+
+
+-- Configuring incomplete, errors occurred!
+Native configure exit code: 1 (no JUCE checkout available)

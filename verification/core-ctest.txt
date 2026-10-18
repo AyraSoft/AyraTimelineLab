@@ -1,0 +1,9 @@
+Test project /mnt/data/AyraTimelineLab/build/core
+    Start 1: core_regressions
+1/2 Test #1: core_regressions .................   Passed    0.01 sec
+    Start 2: fixture_sources
+2/2 Test #2: fixture_sources ..................   Passed    0.71 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.72 sec
