@@ -300,6 +300,7 @@ void ClipDefaultLookAndFeel::drawImageClip (
         }
 
         drawClipOverlapDecoration (g, v.bounds, curveBounds, v.overlap);
+        drawClipStateAndAuditionOverlay (g, v.bounds, v.state, tint);
 
         // 5. Linea dell'Opacita' continua (0% .. 100%) — visibile a zoom medio e grande (showGainEnvelope)
         //    ZERO allocazioni heap durante il paint (buffer inline su stack).
@@ -615,7 +616,8 @@ void ClipDefaultLookAndFeel::drawImageClip (
     }
 
     // 9. Parentesi HUD laterali (Loop / Slip / Trim / Stretch)
-    clips::drawClipEdgeBracket (g, v.bounds, v.hoveredZone);
+    if (v.features.showEdgeTools && ! (v.state.locked || v.state.effectiveLocked))
+        clips::drawClipEdgeBracket (g, v.bounds, v.hoveredZone);
 }
 
 } // namespace ayra::lab::clips

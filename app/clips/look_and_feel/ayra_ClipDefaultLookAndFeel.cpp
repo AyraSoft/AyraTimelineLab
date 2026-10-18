@@ -446,6 +446,7 @@ void ClipDefaultLookAndFeel::drawAudioClip (
         const juce::Rectangle<float> audioCurveBounds (
             v.bounds.getX(), waveformTop, v.bounds.getWidth(), waveformHeight);
         drawClipOverlapDecoration (g, v.bounds, audioCurveBounds, v.overlap);
+        drawClipStateAndAuditionOverlay (g, v.bounds, v.state, tint);
 
         // 5. Unico inviluppo Gain: primo e ultimo punto sono anche gli
         // endpoint di fade-in/fade-out, senza una seconda curva sovrapposta.
@@ -566,7 +567,8 @@ void ClipDefaultLookAndFeel::drawAudioClip (
     }
 
     // 9. Parentesi HUD laterali (Loop / Slip / Trim / Stretch)
-    clips::drawClipEdgeBracket (g, v.bounds, v.hoveredZone);
+    if (v.features.showEdgeTools && ! (v.state.locked || v.state.effectiveLocked))
+        clips::drawClipEdgeBracket (g, v.bounds, v.hoveredZone);
 }
 
 //==============================================================================
@@ -672,6 +674,7 @@ void ClipDefaultLookAndFeel::drawMidiClip (
         drawClipOverlapDecoration (
             g, v.bounds, midiLayout.pianoRollBounds, v.overlap,
             true, v.displayMinPitch, v.displayMaxPitch, v.isDrumMode, v.zoomLod);
+        drawClipStateAndAuditionOverlay (g, v.bounds, v.state, tint);
 
         // 2c. Rendering delle Note MIDI (Pillole Melodiche o Rombi Drum Mode)
         if (v.notes != nullptr && v.numNotes > 0)
@@ -1030,7 +1033,8 @@ void ClipDefaultLookAndFeel::drawMidiClip (
 
 
     // 9. Parentesi HUD laterali (Loop / Slip / Trim / Stretch)
-    clips::drawClipEdgeBracket (g, v.bounds, v.hoveredZone);
+    if (v.features.showEdgeTools && ! (v.state.locked || v.state.effectiveLocked))
+        clips::drawClipEdgeBracket (g, v.bounds, v.hoveredZone);
 
     // 6. Floating HUD Feedback durante drag di Pitch o Velocity
     if (v.isDraggingPitchFeedback)
@@ -1178,6 +1182,7 @@ void ClipDefaultLookAndFeel::drawLineClip (
         }
 
         drawClipOverlapDecoration (g, v.bounds, bodyArea, v.overlap);
+        drawClipStateAndAuditionOverlay (g, v.bounds, v.state, tint);
 
         // 4. Inviluppo Linea: motore unificato con la policy della clip.
         if (v.features.showGainEnvelope && v.points != nullptr && v.numPoints >= 2)
@@ -1298,7 +1303,8 @@ void ClipDefaultLookAndFeel::drawLineClip (
     }
 
     // 9. Parentesi HUD laterali (Loop / Slip / Trim / Stretch)
-    clips::drawClipEdgeBracket (g, v.bounds, v.hoveredZone);
+    if (v.features.showEdgeTools && ! (v.state.locked || v.state.effectiveLocked))
+        clips::drawClipEdgeBracket (g, v.bounds, v.hoveredZone);
 }
 
 void ClipDefaultLookAndFeel::drawKeyframeLane (

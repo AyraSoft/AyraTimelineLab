@@ -47,7 +47,8 @@ enum class TimelineClipZone
     keyframeBody,
     keyframeLeftEdge,
     keyframeRightEdge,
-    keyframeCutRail
+    keyframeCutRail,
+    clipAuditionThumbnail
 };
 
 /** Intento semantico del cursore, indipendente dall'implementazione JUCE.
@@ -188,6 +189,26 @@ struct TimelineCursorContext
 {
     return zone == TimelineClipZone::none ? TimelineClipZone::clipBody : zone;
 }
+
+/** Proiezione dell'asse temporale fornita dall'host (default 32.0s nel Lab). */
+struct TimelineTimeAxisProjection
+{
+    double visibleStartSeconds = 0.0;
+    double visibleDurationSeconds = 32.0;
+
+    [[nodiscard]] double secondsFromCanvasX (const float x, const int canvasWidth) const noexcept
+    {
+        return visibleStartSeconds
+             + (static_cast<double> (x) * std::max (0.001, visibleDurationSeconds))
+                   / static_cast<double> (std::max (1, canvasWidth));
+    }
+
+    [[nodiscard]] double pixelsPerSecond (const int canvasWidth) const noexcept
+    {
+        return static_cast<double> (std::max (1, canvasWidth))
+             / std::max (0.001, visibleDurationSeconds);
+    }
+};
 
 /** Proiezione temporale del canvas demo (32 secondi visibili). */
 [[nodiscard]] inline double timelineSecondsFromCanvasX (
@@ -626,6 +647,8 @@ struct ClipFeatures
     bool showWarpRail = true;
     bool showGainEnvelope = true;
     bool showCutRail = true;
+    bool showFadeHandles = true;
+    bool showEdgeTools = true;
     bool showDisplacementBadges = true;
 };
 
@@ -648,6 +671,8 @@ struct ClipFeatures
 
     // Cut Rail: non deve mai nascondersi con lo zoom verticale (visibile finche' abilitato)
     f.showCutRail = f.cutEnabled;
+    f.showFadeHandles = f.fadesEnabled && f.showGainEnvelope;
+    f.showEdgeTools = f.edgeToolsEnabled;
 
     // Badge numerici di spostamento (samples / ticks / dB): visibili per altezza >= 52px
     f.showDisplacementBadges = (clipHeight >= 52.0f);
@@ -1884,10 +1909,47 @@ inline void applySmartShrinkPushRight (
 }
 
 /** Proiezione visuale di una regione di Overlap o Crossfade (XFade) su una clip. */
+/** Stato comune di presentazione e capacita' della clip (Mute, Lock, Audition, Media Limits).
+    Tutti gli indicatori sono passivi: non introducono bottoni cliccabili nell'header. */
+enum class ClipAuditionVisualState : std::uint8_t
+{
+    unavailable = 0,
+    ready,
+    preparing,
+    playing,
+    error
+};
+
+struct ClipCommonStateVisual
+{
+    bool muted = false;
+    bool effectiveMuted = false;
+    bool locked = false;
+    bool effectiveLocked = false;
+    bool hasColourOverride = false;
+
+    bool isReversed = false;
+    bool isPolarityInverted = false;
+    bool isHoldFrame = false;
+
+    bool showMediaLimits = false;
+    float mediaStartNormX = 0.0f;
+    float mediaEndNormX = 1.0f;
+
+    bool auditionEnabled = false;
+    ClipAuditionVisualState auditionState = ClipAuditionVisualState::unavailable;
+    float auditionPlayheadNormX = -1.0f;
+    juce::Rectangle<float> auditionThumbnailBounds {};
+};
+
 struct ClipOverlapVisual
 {
     bool hasOverlap = false;
     bool isCrossfade = false;
+    bool hasTransition = false;
+    juce::String transitionTypeId;
+    juce::String transitionName;
+    bool transitionAvailable = true;
     bool isTopClip = true;
     bool isContainedInPartner = false;
 
@@ -1984,7 +2046,83 @@ struct AudioClipVisual
     std::int64_t slipDeltaSamples = 0;
     bool isSlipActive = false;
     ClipOverlapVisual overlap;
+    ClipCommonStateVisual state;
 };
+
+
+inline void drawClipStateAndAuditionOverlay (
+    juce::Graphics& g,
+    const juce::Rectangle<float>& clipBounds,
+    const ClipCommonStateVisual& st,
+    const juce::Colour tint)
+{
+    namespace tk = ayra::tokens;
+
+    if (st.muted || st.effectiveMuted)
+    {
+        g.setColour (juce::Colour (0x58070c10));
+        g.fillRoundedRectangle (clipBounds, 4.0f);
+    }
+
+    if (st.showMediaLimits && clipBounds.getWidth() >= 24.0f)
+    {
+        g.setColour (tint.brighter (0.45f).withAlpha (0.75f));
+        if (st.mediaStartNormX > 0.002f && st.mediaStartNormX < 0.998f)
+        {
+            const float mx = clipBounds.getX() + st.mediaStartNormX * clipBounds.getWidth();
+            juce::Path notch;
+            notch.addTriangle (mx - 3.5f, clipBounds.getBottom(), mx + 3.5f, clipBounds.getBottom(), mx, clipBounds.getBottom() - 5.0f);
+            g.fillPath (notch);
+        }
+        if (st.mediaEndNormX > 0.002f && st.mediaEndNormX < 0.998f)
+        {
+            const float mx = clipBounds.getX() + st.mediaEndNormX * clipBounds.getWidth();
+            juce::Path notch;
+            notch.addTriangle (mx - 3.5f, clipBounds.getBottom(), mx + 3.5f, clipBounds.getBottom(), mx, clipBounds.getBottom() - 5.0f);
+            g.fillPath (notch);
+        }
+    }
+
+    float badgeX = clipBounds.getX() + 5.0f;
+    const float badgeY = clipBounds.getY() + 2.0f;
+    const float badgeH = 12.0f;
+
+    auto drawPassiveHeaderPill = [&] (const juce::String& lbl, const juce::Colour col, const float w)
+    {
+        if (badgeX + w > clipBounds.getRight() - 6.0f)
+            return;
+        const juce::Rectangle<float> r (badgeX, badgeY, w, badgeH);
+        g.setColour (juce::Colour (0xd80b171e));
+        g.fillRoundedRectangle (r, 3.0f);
+        g.setColour (col.withAlpha (0.90f));
+        g.drawRoundedRectangle (r, 3.0f, 0.9f);
+        g.setColour (juce::Colours::white);
+        g.setFont (tk::type::caption().boldened().withHeight (8.0f));
+        g.drawText (lbl, r.toNearestInt(), juce::Justification::centred, false);
+        badgeX += w + 3.0f;
+    };
+
+    if (st.muted || st.effectiveMuted)
+        drawPassiveHeaderPill ("M", tk::muteIndicator(), 14.0f);
+    if (st.locked || st.effectiveLocked)
+        drawPassiveHeaderPill ("LOCK", tk::accent(), 30.0f);
+    if (st.isReversed)
+        drawPassiveHeaderPill ("REV", tint.brighter (0.3f), 24.0f);
+    if (st.isPolarityInverted)
+        drawPassiveHeaderPill ("Ø", tint.brighter (0.3f), 14.0f);
+    if (st.isHoldFrame)
+        drawPassiveHeaderPill ("HOLD", tint.brighter (0.3f), 28.0f);
+
+    if (st.auditionPlayheadNormX >= 0.0f && st.auditionPlayheadNormX <= 1.0f)
+    {
+        const float px = clipBounds.getX() + st.auditionPlayheadNormX * clipBounds.getWidth();
+        const auto playCol = tk::playIndicator();
+        g.setColour (playCol.withAlpha (0.35f));
+        g.drawLine (px, clipBounds.getY(), px, clipBounds.getBottom(), 3.5f);
+        g.setColour (juce::Colours::white);
+        g.drawLine (px, clipBounds.getY(), px, clipBounds.getBottom(), 1.3f);
+    }
+}
 
 //==============================================================================
 // PROIEZIONE VISUALE CLIP MIDI
@@ -2424,6 +2562,7 @@ struct MidiClipVisual
     std::int64_t slipDeltaTicks = 0;
     bool isSlipActive      = false;
     ClipOverlapVisual overlap;
+    ClipCommonStateVisual state;
 };
 
 
@@ -2685,6 +2824,35 @@ inline void drawClipOverlapDecoration (
         g.setColour (juce::Colours::white);
         g.setFont (tk::type::caption().boldened().withHeight (8.5f));
         g.drawText (badgeText, pillRect.toNearestInt(), juce::Justification::centred, false);
+
+        if (ov.hasTransition && clipBounds.getHeight() >= 54.0f)
+        {
+            const bool compactTr = (ovRect.getWidth() < 86.0f || ov.transitionName.isEmpty());
+            const juce::String trLabel = compactTr ? "TR" : ("Transition · " + ov.transitionName);
+            const float trW = compactTr ? 26.0f : juce::jmin (116.0f, ovRect.getWidth() - 4.0f);
+            const float trH = 12.0f;
+            const juce::Rectangle<float> trRect (ovRect.getCentreX() - trW * 0.5f, pillRect.getBottom() + 2.0f, trW, trH);
+            const auto trCol = ov.transitionAvailable ? seamCol.brighter (0.20f) : tk::destructiveAction();
+
+            g.setColour (juce::Colour (0xd00b171e));
+            g.fillRoundedRectangle (trRect, trH * 0.5f);
+            g.setColour (trCol.withAlpha (0.85f));
+            g.drawRoundedRectangle (trRect, trH * 0.5f, 0.9f);
+            g.setColour (juce::Colours::white.withAlpha (0.92f));
+            g.setFont (tk::type::caption().withHeight (8.0f));
+            g.drawText (trLabel, trRect.reduced (3.0f, 0.0f).toNearestInt(), juce::Justification::centred, true);
+        }
+    }
+    else if (ov.hasTransition && ovRect.getWidth() >= 18.0f && clipBounds.getHeight() >= 28.0f)
+    {
+        const juce::Rectangle<float> trRect (ovRect.getCentreX() - 11.0f, clipBounds.getY() + 2.0f, 22.0f, 11.0f);
+        g.setColour (juce::Colour (0xd80b171e));
+        g.fillRoundedRectangle (trRect, 5.0f);
+        g.setColour (seamCol.withAlpha (0.90f));
+        g.drawRoundedRectangle (trRect, 5.0f, 0.9f);
+        g.setColour (juce::Colours::white);
+        g.setFont (tk::type::caption().boldened().withHeight (7.5f));
+        g.drawText ("TR", trRect.toNearestInt(), juce::Justification::centred, false);
     }
 }
 //==============================================================================
@@ -2751,6 +2919,7 @@ struct LineClipVisual
     std::int64_t slipDeltaTicks = 0;
     bool isSlipActive = false;
     ClipOverlapVisual overlap;
+    ClipCommonStateVisual state;
 };
 
 struct KeyframeEventVisual

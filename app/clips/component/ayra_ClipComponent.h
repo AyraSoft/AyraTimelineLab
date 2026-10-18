@@ -377,6 +377,17 @@ struct TimelinePointerContext
     double overlapStartSeconds = 0.0;
     double overlapEndSeconds = 0.0;
     MidiOverlapMode midiOverlapMode = MidiOverlapMode::replace;
+
+    std::string laneId;
+    std::string occurrencePath;
+    std::string relationId;
+    std::uint64_t documentRevision = 0;
+    bool isMuted = false;
+    bool isEffectiveMuted = false;
+    bool isLocked = false;
+    bool isEffectiveLocked = false;
+    std::string transitionTypeId;
+    std::string transitionName;
     std::string trackId;
     std::string itemId;
     juce::Point<float> localPosition;
@@ -418,6 +429,20 @@ struct TimelinePointerContext
     stato documentale, media, Undo o routing. Il canvas genitore mantiene per
     ora la cattura del mouse: in questo modo l'estrazione non cambia neppure una
     priorita' delle gesture gia' approvate. */
+
+struct TimelineAuditionRequest
+{
+    std::string trackId;
+    std::string laneId;
+    std::string clipId;
+    std::string occurrencePath;
+    std::string relationId;
+    ClipKind clipKind = ClipKind::audio;
+    double timelineSeconds = 0.0;
+    float clipNormX = 0.0f;
+    std::uint64_t documentRevision = 0;
+};
+
 class ClipComponent : public juce::Component
 {
 public:

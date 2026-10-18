@@ -42,8 +42,10 @@ Session makeFixture()
         t.buffer = false;
         t.oversample = false;
         t.order = {0, 1, 2, 3};
-        t.clips.push_back({"backing-quad", "Neon \u2014 stems", 1, 12, 4, 3, 1.4, 2.1});
-        t.clips.push_back({"backing-stereo", "Neon \u2014 stereo", 15, 12, 2, 7, 0.8, 1.6});
+        t.clips.push_back({"backing-quad", "Neon \u2014 stems", 1, 13, 4, 3, 1.4, 2.1});
+        t.clips.push_back({"backing-sub", "Sub-Layer \u00b7 [Contained Overlap]", 4, 6, 2, 15, 0.8, 0.8});
+        t.clips.push_back({"backing-stereo", "Neon Outro \u00b7 [Transition \u00b7 Dissolve]", 12, 10, 2, 7, 0.8, 1.6});
+        t.clips.push_back({"backing-audition", "Audition Stem \u00b7 [Audition] [Limits]", 23, 8, 2, 27, 0.5, 1.0});
         s.tracks.push_back(std::move(t));
     }
     {
@@ -73,8 +75,10 @@ Session makeFixture()
         t.buffer = false;
         t.oversample = false;
         t.order = {0, 2, 3, 1};
-        t.clips.push_back({"voice-take", "Voce \u2014 stereo / L 1 \u00b7 R 4", 3, 15, 2, 12, 1.2, 2.2});
-        t.clips.push_back({"voice-quad", "Voci \u2014 quad", 21, 9, 4, 16, 0.5, 1.2});
+        t.clips.push_back({"voice-take", "Voce Lead \u00b7 Stereo Take", 2, 10, 2, 12, 1.2, 2.2});
+        t.clips.push_back({"voice-quad", "Voci Harmony \u00b7 [Rev] [\u00d8]", 13, 8, 4, 16, 0.5, 1.2});
+        t.clips.push_back({"voice-muted", "Ad-lib Take \u00b7 [Muted]", 22, 4, 2, 18, 0.5, 0.5});
+        t.clips.push_back({"voice-locked", "Final Comp \u00b7 [Locked]", 27, 4, 2, 20, 0.5, 0.5});
         s.tracks.push_back(std::move(t));
     }
     {
@@ -104,8 +108,10 @@ Session makeFixture()
         t.buffer = false;
         t.oversample = false;
         t.order = {0, 1, 2, 3};
-        t.clips.push_back({"synth-riff", "Synth \u2014 Arpeggio 16th", 2, 14, 2, 5, 0, 0});
-        t.clips.push_back({"synth-lead", "Synth \u2014 Solo Hook", 18, 10, 2, 9, 0, 0});
+        t.clips.push_back({"synth-riff", "Synth \u2014 Arpeggio 16th", 2, 11, 2, 5, 0, 0});
+        t.clips.push_back({"synth-sub", "Synth Arp Fill \u00b7 [Contained MIDI]", 5, 5, 2, 11, 0, 0});
+        t.clips.push_back({"synth-lead", "Synth Solo Hook \u00b7 [Rev] [Limits]", 14, 8, 2, 9, 0, 0});
+        t.clips.push_back({"synth-locked", "Synth Pattern B \u00b7 [Locked]", 23, 8, 2, 13, 0, 0});
         s.tracks.push_back(std::move(t));
     }
     {
@@ -136,7 +142,9 @@ Session makeFixture()
         t.oversample = false;
         t.order = {0, 1, 2, 3};
         t.clips.push_back({"filter-sweep", "Resonance Sweep", 2, 14, 1, 14, 0, 0});
-        t.clips.push_back({"pitch-bend", "Lead Pitch Bend", 18, 10, 1, 18, 0, 0});
+        t.clips.push_back({"filter-sub", "Filter Dip \u00b7 [Contained Line]", 5, 6, 1, 22, 0, 0});
+        t.clips.push_back({"pitch-bend", "Lead Pitch Bend \u00b7 [Transition \u00b7 Dissolve]", 15, 8, 1, 18, 0, 0});
+        t.clips.push_back({"filter-muted", "LFO Modulation \u00b7 [Muted] [\u00d8]", 24, 7, 1, 26, 0, 0});
         s.tracks.push_back(std::move(t));
     }
     {
@@ -283,7 +291,9 @@ Session makeFixture()
         t.oversample = false;
         t.order = {0, 1, 2, 3};
         t.clips.push_back({"filmstrip-scene1", "Visual Sequence \u00b7 Scene 1", 1, 14, 1, 21, 1.0, 1.0});
-        t.clips.push_back({"filmstrip-scene2", "Visual Sequence \u00b7 Climax", 17, 12, 1, 25, 0.5, 1.5});
+        t.clips.push_back({"filmstrip-pip", "Visual PiP \u00b7 [Contained Video]", 4, 6, 1, 33, 0.5, 0.5});
+        t.clips.push_back({"filmstrip-hold", "Visual Climax \u00b7 [Hold]", 16, 6, 1, 25, 0.5, 1.0});
+        t.clips.push_back({"filmstrip-trans", "Visual Outro \u00b7 [Transition \u00b7 Dissolve] [Limits]", 20, 11, 1, 37, 1.0, 1.5});
         s.tracks.push_back(std::move(t));
     }
     {
