@@ -285,7 +285,8 @@ private:
         const bool canMoveX = clips::canAutomationPointMoveHorizontally (
             clips::AutomationBoundaryPolicy::pinnedEndpoints,
             hoveredPointIdx, static_cast<int> (points.size()));
-        const bool canErase = activeZone == TimelineClipZone::gainEnvelopePoint
+        const bool canErase = (activeZone == TimelineClipZone::gainEnvelopePoint
+                               || activeZone == TimelineClipZone::gainPointDashedLine)
             && clips::canAutomationPointBeRemoved (
                 hoveredPointIdx, static_cast<int> (points.size()));
         const auto role = activeZone == TimelineClipZone::none
@@ -304,7 +305,8 @@ private:
         const bool canMoveX = clips::canAutomationPointMoveHorizontally (
             clips::AutomationBoundaryPolicy::pinnedEndpoints,
             ptIdx, static_cast<int> (points.size()));
-        const bool canErase = active == TimelineClipZone::gainEnvelopePoint
+        const bool canErase = (active == TimelineClipZone::gainEnvelopePoint
+                               || active == TimelineClipZone::gainPointDashedLine)
             && clips::canAutomationPointBeRemoved (
                 ptIdx, static_cast<int> (points.size()));
         setMouseCursor (clips::timelineMouseCursor (
