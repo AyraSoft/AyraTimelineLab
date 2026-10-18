@@ -1817,6 +1817,72 @@ enum class MidiOverlapMode : std::uint8_t
 
 struct MidiNoteVisual;
 
+/** Restituisce true se un intervallo clip e' totalmente contenuto all'interno di un altro (sub-interval).
+    In questo scenario non si crea un crossfade coniugato a due vie, bensi' una modalita' Layering / Mute Overlay. */
+[[nodiscard]] inline bool isClipSubInterval (
+    double startA, double lengthA,
+    double startB, double lengthB,
+    double epsilonSec = 0.005) noexcept
+{
+    const double endA = startA + lengthA;
+    const double endB = startB + lengthB;
+    const bool bInsideA = (startB >= startA - epsilonSec) && (endB <= endA + epsilonSec);
+    const bool aInsideB = (startA >= startB - epsilonSec) && (endA <= endB + epsilonSec);
+    return bInsideA || aInsideB;
+}
+
+/** Applica lo Smart Shrink con push all'indietro per la clip sinistra:
+    il punto finale (Fade Out di crossfade) viene impostato a targetNormX e spinge
+    proporzionalmente all'indietro tutti i punti precedenti (incluso il Fade In)
+    evitando collisioni o inversioni di coordinate temporali. */
+template <typename PointContainer>
+inline void applySmartShrinkPushLeft (
+    PointContainer& points,
+    const float targetFadeOutNormX,
+    const float nominalFadeInNormX = 0.0f,
+    const float minSeparation = 0.01f) noexcept
+{
+    if (points.size() < 2) return;
+    const auto lastIdx = points.size() - 1;
+    const float minLastX = minSeparation * static_cast<float> (lastIdx);
+    points[lastIdx].normX = juce::jlimit (std::min (0.99f, minLastX), 0.99f, targetFadeOutNormX);
+
+    for (int p = static_cast<int> (lastIdx) - 1; p >= 0; --p)
+    {
+        const float maxAllowedX = points[static_cast<size_t> (p + 1)].normX - minSeparation;
+        if (p == 0 && nominalFadeInNormX > 0.0f)
+            points[0].normX = std::min (nominalFadeInNormX, std::max (0.0f, maxAllowedX));
+        else
+            points[static_cast<size_t> (p)].normX = std::min (points[static_cast<size_t> (p)].normX,
+                                                             std::max (0.0f, maxAllowedX));
+    }
+}
+
+/** Applica lo Smart Shrink con push in avanti per la clip destra:
+    il punto iniziale (Fade In di crossfade) viene impostato a targetNormX e spinge
+    proporzionalmente in avanti tutti i punti successivi (incluso il Fade Out)
+    evitando collisioni o inversioni di coordinate temporali. */
+template <typename PointContainer>
+inline void applySmartShrinkPushRight (
+    PointContainer& points,
+    const float targetFadeInNormX,
+    const float nominalFadeOutNormX = 1.0f,
+    const float minSeparation = 0.01f) noexcept
+{
+    if (points.size() < 2) return;
+    const float maxFirstX = 1.0f - minSeparation * static_cast<float> (points.size() - 1);
+    points[0].normX = juce::jlimit (0.01f, std::max (0.01f, maxFirstX), targetFadeInNormX);
+
+    for (size_t p = 1; p < points.size(); ++p)
+    {
+        const float minAllowedX = points[p - 1].normX + minSeparation;
+        if (p == points.size() - 1 && nominalFadeOutNormX < 1.0f)
+            points[p].normX = std::max (nominalFadeOutNormX, std::min (1.0f, minAllowedX));
+        else
+            points[p].normX = std::max (points[p].normX, std::min (1.0f, minAllowedX));
+    }
+}
+
 /** Proiezione visuale di una regione di Overlap o Crossfade (XFade) su una clip. */
 struct ClipOverlapVisual
 {

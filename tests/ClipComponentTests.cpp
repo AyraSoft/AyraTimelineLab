@@ -1497,6 +1497,91 @@ int main()
                      "badge background must be the approved high-contrast dark slate");
         }
 
+        // 15. Verifica Sub-Interval Detection e Smart Shrink Push (Compressione Proporzionale dei Fade)
+        {
+            // A) Sub-interval check (Layering / Mute Overlay senza 2-way crossfade)
+            require (isClipSubInterval (2.0, 10.0, 4.0, 3.0),
+                     "clip B (4..7) totally inside A (2..12) must be recognized as sub-interval");
+            require (isClipSubInterval (4.0, 3.0, 2.0, 10.0),
+                     "symmetric sub-interval check must detect inclusion in both orders");
+            require (isClipSubInterval (2.0, 10.0, 2.0, 4.0),
+                     "clip B aligned to start of A must be recognized as sub-interval");
+            require (isClipSubInterval (2.0, 10.0, 8.0, 4.0),
+                     "clip B aligned to end of A must be recognized as sub-interval");
+            require (! isClipSubInterval (2.0, 8.0, 6.0, 6.0),
+                     "partial overlap A (2..10) and B (6..12) is not a sub-interval");
+            require (! isClipSubInterval (2.0, 4.0, 8.0, 4.0),
+                     "disjoint clips must not be sub-intervals");
+
+            // B) Smart Shrink Push Left (Overlap invades left clip opposite fade)
+            std::vector<GainPoint> leftPoints = {
+                { 0.20f, 0.0f, 0.5f, false }, // Fade In endpoint at normX = 0.20
+                { 0.80f, 0.0f, 0.5f, false }  // Fade Out endpoint at normX = 0.80
+            };
+            const float nominalLeftFadeIn = 0.20f;
+
+            // Scenario: Overlap normale (Fade Out a 0.50, non invade il Fade In)
+            applySmartShrinkPushLeft (leftPoints, 0.50f, nominalLeftFadeIn);
+            require (std::abs (leftPoints[1].normX - 0.50f) < 0.001f, "Fade Out must track target");
+            require (std::abs (leftPoints[0].normX - 0.20f) < 0.001f, "Fade In must remain nominal when uninvaded");
+
+            // Scenario: Overlap estremo invade il Fade In (target Fade Out spinge a 0.10)
+            applySmartShrinkPushLeft (leftPoints, 0.10f, nominalLeftFadeIn);
+            require (std::abs (leftPoints[1].normX - 0.10f) < 0.001f, "Fade Out must track target into fade-in zone");
+            require (leftPoints[0].normX < leftPoints[1].normX, "Fade In must be pushed strictly before Fade Out");
+            require (leftPoints[0].normX >= 0.0f, "Fade In must not be negative");
+            require (std::abs (leftPoints[0].normX - 0.09f) < 0.001f, "Fade In must compress proportionally with minSeparation");
+
+            // Scenario: Overlap recede (target Fade Out torna a 0.70) -> Self-Healing!
+            applySmartShrinkPushLeft (leftPoints, 0.70f, nominalLeftFadeIn);
+            require (std::abs (leftPoints[1].normX - 0.70f) < 0.001f, "Fade Out tracks receded target");
+            require (std::abs (leftPoints[0].normX - 0.20f) < 0.001f,
+                     "Fade In must self-heal back to nominal value when overlap recedes");
+
+            // C) Smart Shrink Push Right (Overlap invades right clip opposite fade)
+            std::vector<GainPoint> rightPoints = {
+                { 0.20f, 0.0f, 0.5f, false }, // Fade In endpoint at normX = 0.20
+                { 0.80f, 0.0f, 0.5f, false }  // Fade Out endpoint at normX = 0.80
+            };
+            const float nominalRightFadeOut = 0.80f;
+
+            // Scenario: Overlap normale (Fade In a 0.40, non invade il Fade Out)
+            applySmartShrinkPushRight (rightPoints, 0.40f, nominalRightFadeOut);
+            require (std::abs (rightPoints[0].normX - 0.40f) < 0.001f, "Fade In must track target");
+            require (std::abs (rightPoints[1].normX - 0.80f) < 0.001f, "Fade Out must remain nominal when uninvaded");
+
+            // Scenario: Overlap estremo invade il Fade Out (target Fade In spinge a 0.90)
+            applySmartShrinkPushRight (rightPoints, 0.90f, nominalRightFadeOut);
+            require (std::abs (rightPoints[0].normX - 0.90f) < 0.001f, "Fade In must track target into fade-out zone");
+            require (rightPoints[1].normX > rightPoints[0].normX, "Fade Out must be pushed strictly after Fade In");
+            require (rightPoints[1].normX <= 1.0f, "Fade Out must not exceed 1.0");
+            require (std::abs (rightPoints[1].normX - 0.91f) < 0.001f, "Fade Out must compress proportionally with minSeparation");
+
+            // Scenario: Overlap recede (target Fade In torna a 0.30) -> Self-Healing!
+            applySmartShrinkPushRight (rightPoints, 0.30f, nominalRightFadeOut);
+            require (std::abs (rightPoints[0].normX - 0.30f) < 0.001f, "Fade In tracks receded target");
+            require (std::abs (rightPoints[1].normX - 0.80f) < 0.001f,
+                     "Fade Out must self-heal back to nominal value when overlap recedes");
+
+            // D) Multi-point strict monotonicity check under extreme push
+            std::vector<AutomationPoint> multiPoints = {
+                { 0.10f, 0.2f }, { 0.30f, 0.4f }, { 0.50f, 0.6f }, { 0.70f, 0.8f }, { 0.90f, 1.0f }
+            };
+            applySmartShrinkPushLeft (multiPoints, 0.03f, 0.10f, 0.01f);
+            for (size_t p = 1; p < multiPoints.size(); ++p)
+            {
+                require (multiPoints[p].normX > multiPoints[p - 1].normX,
+                         "multi-point sequence must maintain strict monotonicity under extreme push left");
+            }
+
+            applySmartShrinkPushRight (multiPoints, 0.97f, 0.90f, 0.01f);
+            for (size_t p = 1; p < multiPoints.size(); ++p)
+            {
+                require (multiPoints[p].normX > multiPoints[p - 1].normX,
+                         "multi-point sequence must maintain strict monotonicity under extreme push right");
+            }
+        }
+
         component.setLookAndFeel(nullptr);
         std::cout << "PASS: " << checks << " clip component assertions\n";
         return 0;
