@@ -1050,10 +1050,10 @@ private:
 
         visual.features = computeClipFeaturesLOD (clipFeatures, localBodyBounds.getHeight(), isDraggingWarp, isDraggingEnv);
 
-        if (hoveredClipId == clipId)
+        if (hoveredClipId == clipId || (isDraggedClip && dragZone != TimelineClipZone::none))
         {
             const float localMouseX = mousePos.x - parentOrigin.x;
-            visual.hoveredZone             = activeZone;
+            visual.hoveredZone             = isDraggedClip ? dragZone : activeZone;
             visual.hoveredMarkerIdx        = hoveredMarkerIdx;
             visual.hoveredEnvelopePointIdx = -1;
             visual.hoveredCurveSegmentIdx  = -1;
@@ -1842,7 +1842,7 @@ private:
                 }
             }
             const float stemY = (lane.getBottom() - 4.0f) - (static_cast<float> (rawTargetVel) / 127.0f) * laneUsableH;
-            draggedVelocityFeedbackPos = juce::Point<float> (stemX - 25.0f, stemY - 18.0f);
+            draggedVelocityFeedbackPos = juce::Point<float> (stemX, stemY);
             isDraggingPitchFeedback = false;
 
             updateMidiClip (draggedClipId);
@@ -1929,7 +1929,7 @@ private:
             isDraggingVelocityFeedback = true;
             draggedVelocityFeedbackValue = static_cast<std::uint8_t> (lastTargetVel);
             draggedVelocityFeedbackVisibleInNote = false;
-            draggedVelocityFeedbackPos = juce::Point<float> (e.position.x - 25.0f, e.position.y - 18.0f);
+            draggedVelocityFeedbackPos = e.position;
             isDraggingPitchFeedback = false;
 
             updateMidiClip (draggedClipId);
@@ -2037,18 +2037,15 @@ private:
                     setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
                     isDraggingVelocityFeedback = true;
                     draggedVelocityFeedbackValue = targetNote.velocity;
-                    const bool visibleInside = (ui.zoomLod != clip_midi_law::ZoomLod::preview
-                                                && targetNoteRect.getHeight() >= 9.5f
-                                                && targetNoteRect.getWidth() >= 26.0f);
-                    draggedVelocityFeedbackVisibleInNote = visibleInside;
-                    draggedVelocityFeedbackPos = juce::Point<float> (targetNoteRect.getRight() + 4.0f, targetNoteRect.getY() - 14.0f);
+                    draggedVelocityFeedbackVisibleInNote = false;
+                    draggedVelocityFeedbackPos = e.position;
                     isDraggingPitchFeedback = false;
                 }
                 else
                 {
                     isDraggingPitchFeedback = true;
                     draggedPitchFeedbackValue = targetNote.pitch;
-                    draggedPitchFeedbackPos = juce::Point<float> (targetNoteRect.getRight() + 4.0f, targetNoteRect.getY() - 14.0f);
+                    draggedPitchFeedbackPos = e.position;
                     isDraggingVelocityFeedback = false;
                 }
             }

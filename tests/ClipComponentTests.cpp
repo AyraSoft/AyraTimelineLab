@@ -1464,6 +1464,39 @@ int main()
                      "image crossfade solver must conjugate alpha curve control");
         }
 
+        // 14. Verifica del Badge Pill Fluttuante Unificato (Single Source of Truth per Audio, MIDI, Image, Line)
+        {
+            const juce::Rectangle<float> clipBounds (10.0f, 20.0f, 200.0f, 100.0f);
+            const juce::Point<float> targetCentre (50.0f, 60.0f);
+            const juce::String badgeText = "Gain: +3.0 dB";
+
+            const auto bounds = computeClipBadgeBounds (targetCentre, badgeText, clipBounds, 18.0f);
+            require (bounds.getWidth() >= 48.0f, "badge width must satisfy minimum pill width");
+            require (bounds.getHeight() == 15.0f, "badge height must be canonical 15px");
+            require (bounds.getY() >= clipBounds.getY() + 18.0f, "badge must respect title bar minimum offset");
+            require (bounds.getRight() <= clipBounds.getRight() - 4.0f, "badge must stay within right bounds");
+            require (bounds.getX() >= clipBounds.getX() + 4.0f, "badge must stay within left bounds");
+
+            // Verifica clamp sui bordi estremi
+            const auto leftClamped = computeClipBadgeBounds ({ 0.0f, 22.0f }, badgeText, clipBounds, 18.0f);
+            require (leftClamped.getX() == clipBounds.getX() + 4.0f, "badge must clamp to left boundary");
+
+            const auto rightClamped = computeClipBadgeBounds ({ 300.0f, 22.0f }, badgeText, clipBounds, 18.0f);
+            require (std::abs (rightClamped.getRight() - (clipBounds.getRight() - 4.0f)) < 0.001f,
+                     "badge must clamp to right boundary");
+
+            // Verifica rendering del badge pill: sfondo scuro ad alto contrasto
+            juce::Image badgeImg (juce::Image::ARGB, 100, 30, true);
+            juce::Graphics bg (badgeImg);
+            drawClipBadge (bg, juce::Rectangle<float> (10.0f, 5.0f, 80.0f, 15.0f), badgeText, juce::Colours::cyan);
+
+            // Verifica campionando un pixel all'interno del pill lontano dal testo centrato
+            const auto bgPixel = badgeImg.getPixelAt (16, 12);
+            require (bgPixel.getAlpha() > 0, "rendered badge pill interior must not be transparent");
+            require (bgPixel.getRed() < 40 && bgPixel.getGreen() < 50 && bgPixel.getBlue() < 60,
+                     "badge background must be the approved high-contrast dark slate");
+        }
+
         component.setLookAndFeel(nullptr);
         std::cout << "PASS: " << checks << " clip component assertions\n";
         return 0;

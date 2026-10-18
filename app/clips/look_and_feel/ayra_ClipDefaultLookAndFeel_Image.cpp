@@ -12,24 +12,7 @@ namespace tk = ayra::tokens;
 namespace
 {
 
-void drawImageClipBadge (juce::Graphics& g,
-                         const juce::Rectangle<float> bounds,
-                         const juce::String& text,
-                         const juce::Colour tint)
-{
-    juce::Path pill;
-    pill.addRoundedRectangle (bounds, bounds.getHeight() * 0.5f);
 
-    g.setColour (juce::Colour (0xd80b171e));
-    g.fillPath (pill);
-
-    g.setColour (tint);
-    g.strokePath (pill, juce::PathStrokeType (1.0f));
-
-    g.setColour (juce::Colours::white);
-    g.setFont (tk::type::caption().boldened().withHeight (9.5f));
-    g.drawText (text, bounds.toNearestInt(), juce::Justification::centred, false);
-}
 
 /** Disegna una miniatura procedurale stilizzata coerente col design system Ayra
     quando l'applicazione host non fornisce una bitmap `juce::Image` reale. */
@@ -556,19 +539,18 @@ void ClipDefaultLookAndFeel::drawImageClip (
                 if (pHov || isDashedHov)
                 {
                     const juce::String label = "Op: " + clip_opacity_law::formatOpacityPercentage (nd.opacity);
-                    const float labelLeft = juce::jlimit (v.bounds.getX() + 4.0f, v.bounds.getRight() - 62.0f, nd.renderX - 29.0f);
-                    const float labelTop  = juce::jmax (v.bounds.getY() + 18.0f, nd.y - 19.0f);
-                    drawImageClipBadge (g, juce::Rectangle<float> (labelLeft, labelTop, 58.0f, 15.0f), label, tk::accent());
+                    drawFloatingClipBadge (g, { nd.renderX, nd.y - 12.0f }, label, tk::accent(), v.bounds);
                 }
             }
 
             if (v.isDraggingAllOpacity || (v.hoveredZone == TimelineClipZone::gainEnvelopeLine && v.baseOpacity < 0.995f))
             {
-                const float cx = v.bounds.getCentreX();
+                const float cx = (v.hoverMouseX >= v.bounds.getX() && v.hoverMouseX <= v.bounds.getRight())
+                               ? v.hoverMouseX : v.bounds.getCentreX();
                 const float cy = opacityToY (v.baseOpacity);
-                const juce::String badgeStr = clip_opacity_law::formatOpacityPercentage (v.baseOpacity)
+                const juce::String badgeStr = "Op: " + clip_opacity_law::formatOpacityPercentage (v.baseOpacity)
                                             + (v.isDraggingAllOpacity ? " (Tutti)" : "");
-                drawImageClipBadge (g, juce::Rectangle<float> (cx - 38.0f, cy - 20.0f, 76.0f, 16.0f), badgeStr, tk::accent());
+                drawFloatingClipBadge (g, { cx, cy - 12.0f }, badgeStr, tk::accent(), v.bounds);
             }
         }
 

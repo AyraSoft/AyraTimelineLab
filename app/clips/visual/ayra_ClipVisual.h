@@ -367,6 +367,66 @@ inline void drawClipEdgeBracket (
     g.strokePath (bracket, juce::PathStrokeType (2.5f));
 }
 
+/** Calcola i bounds di un badge fluttuante centrato su un punto target,
+    con padding dinamico e clamp ai confini del contenitore. */
+[[nodiscard]] inline juce::Rectangle<float> computeClipBadgeBounds (
+    const juce::Point<float> targetCentre,
+    const juce::String& text,
+    const juce::Rectangle<float>& containerBounds,
+    const float minTopYOffset = 18.0f) noexcept
+{
+    namespace tk = ayra::tokens;
+    const auto font = tk::type::caption().boldened().withHeight (9.5f);
+    const float textW = juce::GlyphArrangement::getStringWidth (font, text);
+    const float badgeW = juce::jmax (48.0f, textW + 16.0f);
+    constexpr float badgeH = 15.0f;
+
+    const float minX = containerBounds.getX() + 4.0f;
+    const float maxX = juce::jmax (minX, containerBounds.getRight() - badgeW - 4.0f);
+    const float minY = containerBounds.getY() + minTopYOffset;
+    const float maxY = juce::jmax (minY, containerBounds.getBottom() - badgeH - 4.0f);
+
+    const float bx = juce::jlimit (minX, maxX, targetCentre.x - badgeW * 0.5f);
+    const float by = juce::jlimit (minY, maxY, targetCentre.y - badgeH * 0.5f);
+    return { bx, by, badgeW, badgeH };
+}
+
+/** Disegna il badge pill fluttuante unificato (valore in tempo reale / feedback HUD). */
+inline void drawClipBadge (
+    juce::Graphics& g,
+    const juce::Rectangle<float> bounds,
+    const juce::String& text,
+    const juce::Colour tint)
+{
+    namespace tk = ayra::tokens;
+
+    juce::Path pill;
+    pill.addRoundedRectangle (bounds, bounds.getHeight() * 0.5f);
+
+    g.setColour (juce::Colour (0xd80b171e));
+    g.fillPath (pill);
+
+    g.setColour (tint);
+    g.strokePath (pill, juce::PathStrokeType (1.0f));
+
+    g.setColour (juce::Colours::white);
+    g.setFont (tk::type::caption().boldened().withHeight (9.5f));
+    g.drawText (text, bounds.toNearestInt(), juce::Justification::centred, false);
+}
+
+/** Disegna un badge fluttuante ancorato a un punto target con calcolo automatico dei bounds. */
+inline void drawFloatingClipBadge (
+    juce::Graphics& g,
+    const juce::Point<float> targetCentre,
+    const juce::String& text,
+    const juce::Colour tint,
+    const juce::Rectangle<float>& containerBounds,
+    const float minTopYOffset = 18.0f)
+{
+    const auto rect = computeClipBadgeBounds (targetCentre, text, containerBounds, minTopYOffset);
+    drawClipBadge (g, rect, text, tint);
+}
+
 /** Disegna il ghost preview di una clip duplicata durante la gesture di Loop drag. */
 inline void drawLoopDuplicatePreview (
     juce::Graphics& g,
@@ -1613,6 +1673,7 @@ struct AutomationCurveParams
     std::function<juce::String (int ptIdx, float normY)> formatValue = nullptr;
     juce::String draggingAllBadgeText;
     float draggingAllNormY = 0.5f;
+    float dragAnchorX = -1.0f;
 };
 
 /** Punto dell'inviluppo audio materializzato per la vista.
