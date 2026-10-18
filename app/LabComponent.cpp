@@ -198,6 +198,24 @@ public:
     {
         audioCanvas.setWarpFeatureEnabled(host.isWarpFeatureEnabled());
         audioCanvas.setGainFeatureEnabled(host.isGainFeatureEnabled());
+        // Iniezione Solver Matematici Engine -> Canvas (Equal-Power Audio & Curvature Mirroring)
+        audioCanvas.setCrossfadeSolver ([] (const clips::AudioCrossfadeContext& ctx) -> clips::AudioCrossfadeResult
+        {
+            // Solver Audio: preserva guadagni nominali indipendenti e coniuga la curvatura a pari potenza
+            return clips::defaultAudioCrossfadeSolver (ctx);
+        });
+
+        lineCanvas.setCrossfadeSolver ([] (const clips::LineCrossfadeContext& ctx) -> clips::LineCrossfadeResult
+        {
+            // Solver Line: transizione di parametro continua con curvatura speculare
+            return clips::defaultLineCrossfadeSolver (ctx);
+        });
+
+        imageCanvas.setCrossfadeSolver ([] (const clips::ImageCrossfadeContext& ctx) -> clips::ImageCrossfadeResult
+        {
+            // Solver Image: miscelazione complementare di trasparenza (alpha blend)
+            return clips::defaultImageCrossfadeSolver (ctx);
+        });
         midiCanvas.setWarpFeatureEnabled(host.isWarpFeatureEnabled());
         midiCanvas.setOverlayFeatureEnabled(host.isGainFeatureEnabled());
         imageCanvas.setWarpFeatureEnabled(host.isWarpFeatureEnabled());
@@ -455,6 +473,24 @@ public:
     {
         audioCanvas.setWarpFeatureEnabled (host.isWarpFeatureEnabled());
         audioCanvas.setGainFeatureEnabled (host.isGainFeatureEnabled());
+        // Iniezione Solver Matematici Engine -> Canvas (Equal-Power Audio & Curvature Mirroring)
+        audioCanvas.setCrossfadeSolver ([] (const clips::AudioCrossfadeContext& ctx) -> clips::AudioCrossfadeResult
+        {
+            // Solver Audio: preserva guadagni nominali indipendenti e coniuga la curvatura a pari potenza
+            return clips::defaultAudioCrossfadeSolver (ctx);
+        });
+
+        lineCanvas.setCrossfadeSolver ([] (const clips::LineCrossfadeContext& ctx) -> clips::LineCrossfadeResult
+        {
+            // Solver Line: transizione di parametro continua con curvatura speculare
+            return clips::defaultLineCrossfadeSolver (ctx);
+        });
+
+        imageCanvas.setCrossfadeSolver ([] (const clips::ImageCrossfadeContext& ctx) -> clips::ImageCrossfadeResult
+        {
+            // Solver Image: miscelazione complementare di trasparenza (alpha blend)
+            return clips::defaultImageCrossfadeSolver (ctx);
+        });
         midiCanvas.setWarpFeatureEnabled (host.isWarpFeatureEnabled());
         midiCanvas.setOverlayFeatureEnabled (host.isGainFeatureEnabled());
         imageCanvas.setWarpFeatureEnabled (host.isWarpFeatureEnabled());

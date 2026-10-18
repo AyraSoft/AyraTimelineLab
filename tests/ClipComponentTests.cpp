@@ -1377,6 +1377,93 @@ int main()
                      "fade coordinates must correctly position original and new fade points");
         }
 
+        // 9. Crossfade Engine Solvers & Curvature Conjugation Regressions
+        {
+            // 9.1 Solver Audio: Preservazione dei livelli nominali indipendenti delle clip
+            AudioCrossfadeContext audioCtx;
+            audioCtx.interaction = CrossfadeInteractionKind::levelChange;
+            audioCtx.leftClipId = "clipA";
+            audioCtx.rightClipId = "clipB";
+            audioCtx.currentLeftGainDb = -6.0f;
+            audioCtx.currentRightGainDb = 3.0f;
+            audioCtx.isLeftClipModified = false;
+            audioCtx.requestedGainDb = 6.0f; // Utente alza il volume solo su clipB
+
+            audioCtx.rightFadeInControl = { 0.5, 0.5, -1.0 }; // Curva lineare richiesta
+            const auto audioRes1 = defaultAudioCrossfadeSolver (audioCtx);
+            require (std::abs (audioRes1.leftGainDb - (-6.0f)) < 0.001f,
+                     "clipA gain must remain unchanged at -6 dB when clipB is edited");
+            require (std::abs (audioRes1.rightGainDb - 6.0f) < 0.001f,
+                     "clipB gain must be updated to requested +6 dB");
+            require (std::abs (audioRes1.leftFadeOutControl.x - 0.5) < 0.001f
+                     && std::abs (audioRes1.leftFadeOutControl.y - 0.5) < 0.001f,
+                     "clipA fadeOut handle must be conjugate mirror (0.5, 0.5) of clipB linear fadeIn on levelChange");
+
+            // Modifica su clipA
+            audioCtx.isLeftClipModified = true;
+            audioCtx.requestedGainDb = -12.0f;
+            const auto audioRes2 = defaultAudioCrossfadeSolver (audioCtx);
+            require (std::abs (audioRes2.leftGainDb - (-12.0f)) < 0.001f,
+                     "clipA gain must be updated to requested -12 dB");
+            require (std::abs (audioRes2.rightGainDb - 3.0f) < 0.001f,
+                     "clipB gain must remain unchanged at +3 dB when clipA is edited");
+
+            // 9.2 Solver Audio: Coniugazione speculare delle maniglie di curvatura (Drag & Reset da doppio click)
+            audioCtx.interaction = CrossfadeInteractionKind::curvatureChange;
+            audioCtx.isLeftClipModified = false;
+            audioCtx.requestedControl = { 0.40, 0.75, -1.0 }; // Curvatura convessa su fadeIn di clipB
+            const auto curveRes = defaultAudioCrossfadeSolver (audioCtx);
+            require (std::abs (curveRes.rightFadeInControl.x - 0.40) < 0.001f
+                     && std::abs (curveRes.rightFadeInControl.y - 0.75) < 0.001f,
+                     "clipB fadeIn control must take requested coordinates");
+            require (std::abs (curveRes.leftFadeOutControl.x - (1.0 - 0.40)) < 0.001f
+                     && std::abs (curveRes.leftFadeOutControl.y - 0.75) < 0.001f,
+                     "clipA fadeOut control must be conjugate mirror (1-x, y) for equal-power symmetry");
+
+            // Test doppio click / reset a default (0.5, 0.5, -1.0)
+            audioCtx.requestedControl = { 0.5, 0.5, -1.0 };
+            const auto resetRes = defaultAudioCrossfadeSolver (audioCtx);
+            require (std::abs (resetRes.rightFadeInControl.x - 0.5) < 0.001f
+                     && std::abs (resetRes.rightFadeInControl.y - 0.5) < 0.001f,
+                     "clipB fadeIn control must reset to linear center (0.5, 0.5)");
+            require (std::abs (resetRes.leftFadeOutControl.x - 0.5) < 0.001f
+                     && std::abs (resetRes.leftFadeOutControl.y - 0.5) < 0.001f,
+                     "clipA fadeOut control must simultaneously reset to conjugate linear center (0.5, 0.5)");
+
+            // 9.3 Iniezione solver custom: engine custom delegate
+            bool customSolverInvoked = false;
+            AudioCrossfadeSolver customSolver = [&] (const AudioCrossfadeContext& c) -> AudioCrossfadeResult
+            {
+                customSolverInvoked = true;
+                AudioCrossfadeResult r;
+                r.leftGainDb = c.currentLeftGainDb;
+                r.rightGainDb = c.currentRightGainDb;
+                return r;
+            };
+            const auto customRes = customSolver (audioCtx);
+            require (customSolverInvoked, "custom engine crossfade solver must be successfully invokable");
+
+            // 9.4 Solver Line e Image: verifica coniugazione complementare di default
+            LineCrossfadeContext lineCtx;
+            lineCtx.interaction = CrossfadeInteractionKind::levelChange;
+            lineCtx.currentLeftValue = 0.2f;
+            lineCtx.currentRightValue = 0.8f;
+            lineCtx.isLeftClipModified = false;
+            lineCtx.requestedValue = 0.95f;
+            const auto lineRes = defaultLineCrossfadeSolver (lineCtx);
+            require (std::abs (lineRes.leftValue - 0.2f) < 0.001f && std::abs (lineRes.rightValue - 0.95f) < 0.001f,
+                     "line crossfade solver must preserve independent endpoint values");
+
+            ImageCrossfadeContext imgCtx;
+            imgCtx.interaction = CrossfadeInteractionKind::curvatureChange;
+            imgCtx.isLeftClipModified = true;
+            imgCtx.requestedControl = { 0.35, 0.65, -1.0 };
+            const auto imgRes = defaultImageCrossfadeSolver (imgCtx);
+            require (std::abs (imgRes.rightFadeInControl.x - (1.0 - 0.35)) < 0.001f
+                     && std::abs (imgRes.rightFadeInControl.y - 0.65) < 0.001f,
+                     "image crossfade solver must conjugate alpha curve control");
+        }
+
         component.setLookAndFeel(nullptr);
         std::cout << "PASS: " << checks << " clip component assertions\n";
         return 0;

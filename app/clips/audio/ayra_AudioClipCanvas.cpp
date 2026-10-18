@@ -16,6 +16,12 @@ using clips::computeClipFeaturesLOD;
 using clips::computeClipOverflows;
 using clips::GainPoint;
 using clips::TimelineClipZone;
+using clips::AudioCrossfadeContext;
+using clips::AudioCrossfadeResult;
+using clips::AudioCrossfadeSolver;
+using clips::CrossfadeInteractionKind;
+using clips::defaultAudioCrossfadeSolver;
+using clips::makeBoundedCurvePixelSegment;
 namespace clip_gain_law = clips::clip_gain_law;
 namespace clip_height_law = clips::clip_height_law;
 
@@ -121,6 +127,70 @@ public:
         std::vector<Peaks> rawPeaks;
         std::vector<juce::Path> values;
     };
+
+    // Crossfade Compensation Solver (Iniezione delegate Engine -> GUI)
+    AudioCrossfadeSolver crossfadeSolver;
+
+    void setCrossfadeSolver (AudioCrossfadeSolver solver)
+    {
+        crossfadeSolver = std::move (solver);
+    }
+
+    [[nodiscard]] AudioCrossfadeResult solveAudioCrossfade (const AudioCrossfadeContext& ctx) const
+    {
+        if (crossfadeSolver != nullptr)
+            return crossfadeSolver (ctx);
+        return defaultAudioCrossfadeSolver (ctx);
+    }
+
+    struct CrossfadePartnerLookup
+    {
+        bool found = false;
+        std::string partnerClipId;
+        double overlapDuration = 0.0;
+    };
+
+    [[nodiscard]] CrossfadePartnerLookup findActiveCrossfadeForFadeIn (const std::string& clipId) const
+    {
+        for (const auto& pair : xfadePairs)
+        {
+            if (pair.second == clipId)
+            {
+                const auto leftIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                   [&] (const Clip& c) { return c.id == pair.first; });
+                const auto rightIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                    [&] (const Clip& c) { return c.id == pair.second; });
+                if (leftIt != data.clips.end() && rightIt != data.clips.end())
+                {
+                    const double ovStart = std::max (leftIt->start, rightIt->start);
+                    const double ovEnd   = std::min (leftIt->start + leftIt->length, rightIt->start + rightIt->length);
+                    return { true, pair.first, std::max (0.001, ovEnd - ovStart) };
+                }
+            }
+        }
+        return {};
+    }
+
+    [[nodiscard]] CrossfadePartnerLookup findActiveCrossfadeForFadeOut (const std::string& clipId) const
+    {
+        for (const auto& pair : xfadePairs)
+        {
+            if (pair.first == clipId)
+            {
+                const auto leftIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                   [&] (const Clip& c) { return c.id == pair.first; });
+                const auto rightIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                    [&] (const Clip& c) { return c.id == pair.second; });
+                if (leftIt != data.clips.end() && rightIt != data.clips.end())
+                {
+                    const double ovStart = std::max (leftIt->start, rightIt->start);
+                    const double ovEnd   = std::min (leftIt->start + leftIt->length, rightIt->start + rightIt->length);
+                    return { true, pair.second, std::max (0.001, ovEnd - ovStart) };
+                }
+            }
+        }
+        return {};
+    }
 
     explicit AudioClipCanvas (
         LabComponent& h,
@@ -392,6 +462,176 @@ public:
             }
         }
         layoutClipComponents();
+    }
+
+    //==============================================================================
+    // Crossfade Interaction Dispatchers (SSOT per Drag & Doppio Click)
+    //==============================================================================
+
+    /** Applica una modifica di curvatura (drag o reset a default da doppio click)
+        e notifica il solver affinche' la curva della clip partner venga coniugata. */
+    void applyCrossfadeCurvature (const std::string& clipId, bool isFadeIn, const ayra::curves::QuadraticControl& control)
+    {
+        if (!uiStates.contains (clipId)) return;
+        auto& ui = uiStates[clipId];
+
+        if (isFadeIn)
+        {
+            const auto partner = findActiveCrossfadeForFadeIn (clipId);
+            if (partner.found && uiStates.contains (partner.partnerClipId))
+            {
+                auto& leftUi = uiStates[partner.partnerClipId];
+                AudioCrossfadeContext ctx;
+                ctx.interaction = CrossfadeInteractionKind::curvatureChange;
+                ctx.modifiedClipId = clipId;
+                ctx.isLeftClipModified = false;
+                ctx.leftClipId = partner.partnerClipId;
+                ctx.rightClipId = clipId;
+                ctx.currentLeftGainDb = leftUi.gainPoints.back().gainDb;
+                ctx.currentRightGainDb = ui.gainPoints.front().gainDb;
+                ctx.leftFadeOutControl = { leftUi.fadeOutControlX, leftUi.fadeOutCurve, leftUi.fadeOutControlWeight };
+                ctx.rightFadeInControl = control;
+                ctx.requestedControl = control;
+                ctx.overlapDurationSec = partner.overlapDuration;
+
+                const auto res = solveAudioCrossfade (ctx);
+                ui.fadeInControlX = static_cast<float> (res.rightFadeInControl.x);
+                ui.fadeInCurve    = static_cast<float> (res.rightFadeInControl.y);
+                ui.fadeInControlWeight = static_cast<float> (res.rightFadeInControl.weight);
+
+                leftUi.fadeOutControlX = static_cast<float> (res.leftFadeOutControl.x);
+                leftUi.fadeOutCurve    = static_cast<float> (res.leftFadeOutControl.y);
+                leftUi.fadeOutControlWeight = static_cast<float> (res.leftFadeOutControl.weight);
+
+                updateWaveforms (partner.partnerClipId);
+            }
+            else
+            {
+                ui.fadeInControlX = static_cast<float> (control.x);
+                ui.fadeInCurve    = static_cast<float> (control.y);
+                ui.fadeInControlWeight = static_cast<float> (control.weight);
+            }
+        }
+        else // fadeOut
+        {
+            const auto partner = findActiveCrossfadeForFadeOut (clipId);
+            if (partner.found && uiStates.contains (partner.partnerClipId))
+            {
+                auto& rightUi = uiStates[partner.partnerClipId];
+                AudioCrossfadeContext ctx;
+                ctx.interaction = CrossfadeInteractionKind::curvatureChange;
+                ctx.modifiedClipId = clipId;
+                ctx.isLeftClipModified = true;
+                ctx.leftClipId = clipId;
+                ctx.rightClipId = partner.partnerClipId;
+                ctx.currentLeftGainDb = ui.gainPoints.back().gainDb;
+                ctx.currentRightGainDb = rightUi.gainPoints.front().gainDb;
+                ctx.leftFadeOutControl = control;
+                ctx.rightFadeInControl = { rightUi.fadeInControlX, rightUi.fadeInCurve, rightUi.fadeInControlWeight };
+                ctx.requestedControl = control;
+                ctx.overlapDurationSec = partner.overlapDuration;
+
+                const auto res = solveAudioCrossfade (ctx);
+                ui.fadeOutControlX = static_cast<float> (res.leftFadeOutControl.x);
+                ui.fadeOutCurve    = static_cast<float> (res.leftFadeOutControl.y);
+                ui.fadeOutControlWeight = static_cast<float> (res.leftFadeOutControl.weight);
+
+                rightUi.fadeInControlX = static_cast<float> (res.rightFadeInControl.x);
+                rightUi.fadeInCurve    = static_cast<float> (res.rightFadeInControl.y);
+                rightUi.fadeInControlWeight = static_cast<float> (res.rightFadeInControl.weight);
+
+                updateWaveforms (partner.partnerClipId);
+            }
+            else
+            {
+                ui.fadeOutControlX = static_cast<float> (control.x);
+                ui.fadeOutCurve    = static_cast<float> (control.y);
+                ui.fadeOutControlWeight = static_cast<float> (control.weight);
+            }
+        }
+
+        updateWaveforms (clipId);
+        layoutClipComponents();
+        repaint();
+    }
+
+    /** Applica una modifica di livello su un estremo di crossfade (drag o reset a 0 dB da doppio click)
+        e notifica il solver affinche' la maniglia coniugata della clip partner venga ricalcolata. */
+    void applyCrossfadeLevel (const std::string& clipId, bool isFadeIn, float requestedGainDb)
+    {
+        if (!uiStates.contains (clipId)) return;
+        auto& ui = uiStates[clipId];
+
+        if (isFadeIn)
+        {
+            if (!ui.gainPoints.empty())
+                ui.gainPoints.front().gainDb = requestedGainDb;
+            const auto partner = findActiveCrossfadeForFadeIn (clipId);
+            if (partner.found && uiStates.contains (partner.partnerClipId))
+            {
+                auto& leftUi = uiStates[partner.partnerClipId];
+                AudioCrossfadeContext ctx;
+                ctx.interaction = CrossfadeInteractionKind::levelChange;
+                ctx.modifiedClipId = clipId;
+                ctx.isLeftClipModified = false;
+                ctx.leftClipId = partner.partnerClipId;
+                ctx.rightClipId = clipId;
+                ctx.currentLeftGainDb = leftUi.gainPoints.back().gainDb;
+                ctx.currentRightGainDb = requestedGainDb;
+                ctx.requestedGainDb = requestedGainDb;
+                ctx.leftFadeOutControl = { leftUi.fadeOutControlX, leftUi.fadeOutCurve, leftUi.fadeOutControlWeight };
+                ctx.rightFadeInControl = { ui.fadeInControlX, ui.fadeInCurve, ui.fadeInControlWeight };
+                ctx.overlapDurationSec = partner.overlapDuration;
+
+                const auto res = solveAudioCrossfade (ctx);
+                ui.fadeInControlX = static_cast<float> (res.rightFadeInControl.x);
+                ui.fadeInCurve    = static_cast<float> (res.rightFadeInControl.y);
+                ui.fadeInControlWeight = static_cast<float> (res.rightFadeInControl.weight);
+
+                leftUi.fadeOutControlX = static_cast<float> (res.leftFadeOutControl.x);
+                leftUi.fadeOutCurve    = static_cast<float> (res.leftFadeOutControl.y);
+                leftUi.fadeOutControlWeight = static_cast<float> (res.leftFadeOutControl.weight);
+
+                updateWaveforms (partner.partnerClipId);
+            }
+        }
+        else // fadeOut
+        {
+            if (!ui.gainPoints.empty())
+                ui.gainPoints.back().gainDb = requestedGainDb;
+            const auto partner = findActiveCrossfadeForFadeOut (clipId);
+            if (partner.found && uiStates.contains (partner.partnerClipId))
+            {
+                auto& rightUi = uiStates[partner.partnerClipId];
+                AudioCrossfadeContext ctx;
+                ctx.interaction = CrossfadeInteractionKind::levelChange;
+                ctx.modifiedClipId = clipId;
+                ctx.isLeftClipModified = true;
+                ctx.leftClipId = clipId;
+                ctx.rightClipId = partner.partnerClipId;
+                ctx.currentLeftGainDb = requestedGainDb;
+                ctx.currentRightGainDb = rightUi.gainPoints.front().gainDb;
+                ctx.requestedGainDb = requestedGainDb;
+                ctx.leftFadeOutControl = { ui.fadeOutControlX, ui.fadeOutCurve, ui.fadeOutControlWeight };
+                ctx.rightFadeInControl = { rightUi.fadeInControlX, rightUi.fadeInCurve, rightUi.fadeInControlWeight };
+                ctx.overlapDurationSec = partner.overlapDuration;
+
+                const auto res = solveAudioCrossfade (ctx);
+                ui.fadeOutControlX = static_cast<float> (res.leftFadeOutControl.x);
+                ui.fadeOutCurve    = static_cast<float> (res.leftFadeOutControl.y);
+                ui.fadeOutControlWeight = static_cast<float> (res.leftFadeOutControl.weight);
+
+                rightUi.fadeInControlX = static_cast<float> (res.rightFadeInControl.x);
+                rightUi.fadeInCurve    = static_cast<float> (res.rightFadeInControl.y);
+                rightUi.fadeInControlWeight = static_cast<float> (res.rightFadeInControl.weight);
+
+                updateWaveforms (partner.partnerClipId);
+            }
+        }
+
+        updateWaveforms (clipId);
+        layoutClipComponents();
+        repaint();
     }
 
     void splitClipUI(const std::string& origId, const std::string& newId, float splitFrac)
@@ -759,13 +999,28 @@ private:
                     leftUi.gainPoints.back().normX   = juce::jlimit (leftMinX, 0.99f, static_cast<float> ((ovStart - left->start) / std::max (0.05, left->length)));
                     rightUi.gainPoints.front().normX = juce::jlimit (0.01f, rightMaxX, static_cast<float> ((ovEnd - right->start) / std::max (0.05, right->length)));
 
-                    if (syncGainValue)
-                    {
-                        if (modifiedClipId == left->id)
-                            rightUi.gainPoints.front().gainDb = leftUi.gainPoints.back().gainDb;
-                        else if (modifiedClipId == right->id)
-                            leftUi.gainPoints.back().gainDb = rightUi.gainPoints.front().gainDb;
-                    }
+                    // Interroga il solver di crossfade per calcolare curve e compensazione
+                    AudioCrossfadeContext ctx;
+                    ctx.interaction = syncGainValue ? CrossfadeInteractionKind::levelChange : CrossfadeInteractionKind::boundaryResize;
+                    ctx.modifiedClipId = modifiedClipId;
+                    ctx.isLeftClipModified = (modifiedClipId == left->id);
+                    ctx.leftClipId = left->id;
+                    ctx.rightClipId = right->id;
+                    ctx.currentLeftGainDb = leftUi.gainPoints.back().gainDb;
+                    ctx.currentRightGainDb = rightUi.gainPoints.front().gainDb;
+                    ctx.requestedGainDb = (modifiedClipId == left->id) ? leftUi.gainPoints.back().gainDb : rightUi.gainPoints.front().gainDb;
+                    ctx.leftFadeOutControl = { leftUi.fadeOutControlX, leftUi.fadeOutCurve, leftUi.fadeOutControlWeight };
+                    ctx.rightFadeInControl = { rightUi.fadeInControlX, rightUi.fadeInCurve, rightUi.fadeInControlWeight };
+                    ctx.overlapDurationSec = ovEnd - ovStart;
+
+                    const auto res = solveAudioCrossfade (ctx);
+                    leftUi.fadeOutControlX = static_cast<float> (res.leftFadeOutControl.x);
+                    leftUi.fadeOutCurve    = static_cast<float> (res.leftFadeOutControl.y);
+                    leftUi.fadeOutControlWeight = static_cast<float> (res.leftFadeOutControl.weight);
+
+                    rightUi.fadeInControlX = static_cast<float> (res.rightFadeInControl.x);
+                    rightUi.fadeInCurve    = static_cast<float> (res.rightFadeInControl.y);
+                    rightUi.fadeInControlWeight = static_cast<float> (res.rightFadeInControl.weight);
                 }
             }
         }
@@ -1063,6 +1318,39 @@ private:
                         {
                             res.zone = TimelineClipZone::fadeOutCurveHandle;
                             return res;
+                        }
+
+                        // Rilevamento della curva e dell'estremo partner visibili nell'area di overlap della top clip
+                        const auto ovInfo = findOverlapForTopClip (c.id);
+                        if (ovInfo.inCrossfade && !ovInfo.leftClipId.empty())
+                        {
+                            const auto leftClipIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                                  [&] (const Clip& clp) { return clp.id == ovInfo.leftClipId; });
+                            const auto leftUiIt = uiStates.find (ovInfo.leftClipId);
+                            if (leftClipIt != data.clips.end() && leftUiIt != uiStates.end() && !leftUiIt->second.gainPoints.empty())
+                            {
+                                const float cx0 = curveBounds.getX() + juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.startSec - c.start) / c.length)) * curveBounds.getWidth();
+                                const float cx1 = curveBounds.getX() + juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.endSec - c.start) / c.length))   * curveBounds.getWidth();
+                                const float py0 = curveBounds.getBottom() - juce::jlimit (0.0f, 1.0f, clip_gain_law::dbToNorm (leftUiIt->second.gainPoints.back().gainDb)) * curveBounds.getHeight();
+                                const float py1 = curveBounds.getBottom();
+                                const auto partnerSeg = makeBoundedCurvePixelSegment (
+                                    { cx0, py0 }, { cx1, py1 },
+                                    { leftUiIt->second.fadeOutControlX, leftUiIt->second.fadeOutCurve, leftUiIt->second.fadeOutControlWeight });
+
+                                if (partnerSeg.control.getDistanceFrom (p) <= 8.5f)
+                                {
+                                    res.clip = &(*leftClipIt);
+                                    res.zone = TimelineClipZone::fadeOutCurveHandle;
+                                    return res;
+                                }
+                                if (juce::Point<float> (cx0, py0).getDistanceFrom (p) <= 8.5f)
+                                {
+                                    res.clip = &(*leftClipIt);
+                                    res.zone = TimelineClipZone::gainEnvelopePoint;
+                                    res.gainIdx = static_cast<int> (leftUiIt->second.gainPoints.size()) - 1;
+                                    return res;
+                                }
+                            }
                         }
 
                         // 3. Handle di curvatura dei segmenti (1:1 mapping, prioritari sui punti se vicini)
@@ -1544,20 +1832,8 @@ private:
                 { segment.start.x, segment.start.y,
                   segment.end.x, segment.end.y },
                 e.position.x, e.position.y);
-            if (fadeIn)
-            {
-                ui.fadeInControlX = static_cast<float> (control.x);
-                ui.fadeInCurve = static_cast<float> (control.y);
-                ui.fadeInControlWeight = -1.0f;
-            }
-            else
-            {
-                ui.fadeOutControlX = static_cast<float> (control.x);
-                ui.fadeOutCurve = static_cast<float> (control.y);
-                ui.fadeOutControlWeight = -1.0f;
-            }
-            updateWaveforms (draggedClipId);
-            repaint();
+
+            applyCrossfadeCurvature (draggedClipId, fadeIn, control);
             return;
         }
 
@@ -1653,9 +1929,19 @@ private:
                     const float maxX = (draggedGainIdx == static_cast<int>(ui.gainPoints.size()) - 1) ? 1.0f : (ui.gainPoints[static_cast<size_t>(draggedGainIdx + 1)].normX - 0.01f);
                     if (!e.mods.isShiftDown())
                         ui.gainPoints[static_cast<size_t>(draggedGainIdx)].normX = juce::jlimit(minX, maxX, currentNormX);
-                    ui.gainPoints[static_cast<size_t>(draggedGainIdx)].gainDb = currentDb;
+
+                    if (draggedGainIdx == 0)
+                        applyCrossfadeLevel (draggedClipId, true, currentDb);
+                    else if (draggedGainIdx == static_cast<int>(ui.gainPoints.size()) - 1)
+                        applyCrossfadeLevel (draggedClipId, false, currentDb);
+                    else
+                    {
+                        ui.gainPoints[static_cast<size_t>(draggedGainIdx)].gainDb = currentDb;
+                        updateWaveforms (draggedClipId);
+                        repaint();
+                    }
                 }
-                updateWaveforms(draggedClipId);
+                updateWaveforms (draggedClipId);
                 repaint();
             }
         }
@@ -2067,7 +2353,7 @@ private:
                 xfadePairs.erase (pairKey);
             else
                 xfadePairs.insert (pairKey);
-            syncActiveAudioCrossfades (hit.clip->id, true);
+            syncActiveAudioCrossfades (hit.clip->id, false);
             updateWaveforms (ovInfo.leftClipId);
             updateWaveforms (ovInfo.rightClipId);
             repaint();
@@ -2101,9 +2387,16 @@ private:
         // 1. Doppio click su punto di inviluppo Gain: reset a gain 0 dB
         if (hit.zone == TimelineClipZone::gainEnvelopePoint && hit.gainIdx >= 0 && hit.gainIdx < static_cast<int>(ui.gainPoints.size()))
         {
-            ui.gainPoints[static_cast<size_t>(hit.gainIdx)].gainDb = 0.0f;
-            updateWaveforms(hit.clip->id);
-            repaint();
+            if (hit.gainIdx == 0)
+                applyCrossfadeLevel (hit.clip->id, true, 0.0f);
+            else if (hit.gainIdx == static_cast<int>(ui.gainPoints.size()) - 1)
+                applyCrossfadeLevel (hit.clip->id, false, 0.0f);
+            else
+            {
+                ui.gainPoints[static_cast<size_t>(hit.gainIdx)].gainDb = 0.0f;
+                updateWaveforms(hit.clip->id);
+                repaint();
+            }
             return;
         }
 
@@ -2149,20 +2442,12 @@ private:
 
         if (hit.zone == TimelineClipZone::fadeInCurveHandle)
         {
-            ui.fadeInControlX = 0.5f;
-            ui.fadeInCurve = 0.5f;
-            ui.fadeInControlWeight = -1.0f;
-            updateWaveforms (hit.clip->id);
-            repaint();
+            applyCrossfadeCurvature (hit.clip->id, true, { 0.5, 0.5, -1.0 });
             return;
         }
         if (hit.zone == TimelineClipZone::fadeOutCurveHandle)
         {
-            ui.fadeOutControlX = 0.5f;
-            ui.fadeOutCurve = 0.5f;
-            ui.fadeOutControlWeight = -1.0f;
-            updateWaveforms (hit.clip->id);
-            repaint();
+            applyCrossfadeCurvature (hit.clip->id, false, { 0.5, 0.5, -1.0 });
             return;
         }
 

@@ -23,6 +23,12 @@ using clips::LineClipRenderMode;
 using clips::LineClipVisual;
 using clips::MidiEnvelopePoint;
 using clips::TimelineClipZone;
+using clips::CrossfadeInteractionKind;
+using clips::defaultLineCrossfadeSolver;
+using clips::LineCrossfadeContext;
+using clips::LineCrossfadeResult;
+using clips::LineCrossfadeSolver;
+using clips::makeBoundedCurvePixelSegment;
 namespace clip_height_law = clips::clip_height_law;
 
 struct LineWarpPoint
@@ -95,6 +101,202 @@ class LineClipCanvas final : public juce::Component,
                              public clips::LineClipPresentationProvider
 {
 public:
+    // Crossfade Compensation Solver per LineClip
+    LineCrossfadeSolver crossfadeSolver;
+
+    void setCrossfadeSolver (LineCrossfadeSolver solver)
+    {
+        crossfadeSolver = std::move (solver);
+    }
+
+    [[nodiscard]] LineCrossfadeResult solveLineCrossfade (const LineCrossfadeContext& ctx) const
+    {
+        if (crossfadeSolver != nullptr)
+            return crossfadeSolver (ctx);
+        return defaultLineCrossfadeSolver (ctx);
+    }
+
+    struct CrossfadePartnerLookup
+    {
+        bool found = false;
+        std::string partnerClipId;
+        double overlapDuration = 0.0;
+    };
+
+    [[nodiscard]] CrossfadePartnerLookup findActiveCrossfadeForFadeIn (const std::string& clipId) const
+    {
+        for (const auto& pair : xfadePairs)
+        {
+            if (pair.second == clipId)
+            {
+                const auto leftIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                   [&] (const Clip& c) { return c.id == pair.first; });
+                const auto rightIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                    [&] (const Clip& c) { return c.id == pair.second; });
+                if (leftIt != data.clips.end() && rightIt != data.clips.end())
+                {
+                    const double ovStart = std::max (leftIt->start, rightIt->start);
+                    const double ovEnd   = std::min (leftIt->start + leftIt->length, rightIt->start + rightIt->length);
+                    return { true, pair.first, std::max (0.001, ovEnd - ovStart) };
+                }
+            }
+        }
+        return {};
+    }
+
+    [[nodiscard]] CrossfadePartnerLookup findActiveCrossfadeForFadeOut (const std::string& clipId) const
+    {
+        for (const auto& pair : xfadePairs)
+        {
+            if (pair.first == clipId)
+            {
+                const auto leftIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                   [&] (const Clip& c) { return c.id == pair.first; });
+                const auto rightIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                    [&] (const Clip& c) { return c.id == pair.second; });
+                if (leftIt != data.clips.end() && rightIt != data.clips.end())
+                {
+                    const double ovStart = std::max (leftIt->start, rightIt->start);
+                    const double ovEnd   = std::min (leftIt->start + leftIt->length, rightIt->start + rightIt->length);
+                    return { true, pair.second, std::max (0.001, ovEnd - ovStart) };
+                }
+            }
+        }
+        return {};
+    }
+
+    //==============================================================================
+    // Crossfade Interaction Dispatchers (SSOT per Drag & Doppio Click)
+    //==============================================================================
+
+    void applyCrossfadeCurvature (const std::string& clipId, bool isFadeIn, const ayra::curves::QuadraticControl& control)
+    {
+        if (!uiStates.contains (clipId)) return;
+        auto& ui = uiStates[clipId];
+
+        if (isFadeIn)
+        {
+            const auto partner = findActiveCrossfadeForFadeIn (clipId);
+            if (partner.found && uiStates.contains (partner.partnerClipId))
+            {
+                auto& leftUi = uiStates[partner.partnerClipId];
+                LineCrossfadeContext ctx;
+                ctx.interaction = CrossfadeInteractionKind::curvatureChange;
+                ctx.modifiedClipId = clipId;
+                ctx.isLeftClipModified = false;
+                ctx.leftClipId = partner.partnerClipId;
+                ctx.rightClipId = clipId;
+                ctx.currentLeftValue = leftUi.points.back().normValue;
+                ctx.currentRightValue = ui.points.front().normValue;
+                ctx.leftFadeOutControl = leftUi.boundary.fadeOutControl;
+                ctx.rightFadeInControl = control;
+                ctx.requestedControl = control;
+                ctx.overlapDurationSec = partner.overlapDuration;
+
+                const auto res = solveLineCrossfade (ctx);
+                ui.boundary.fadeInControl = res.rightFadeInControl;
+                leftUi.boundary.fadeOutControl = res.leftFadeOutControl;
+            }
+            else
+            {
+                ui.boundary.fadeInControl = control;
+            }
+        }
+        else // fadeOut
+        {
+            const auto partner = findActiveCrossfadeForFadeOut (clipId);
+            if (partner.found && uiStates.contains (partner.partnerClipId))
+            {
+                auto& rightUi = uiStates[partner.partnerClipId];
+                LineCrossfadeContext ctx;
+                ctx.interaction = CrossfadeInteractionKind::curvatureChange;
+                ctx.modifiedClipId = clipId;
+                ctx.isLeftClipModified = true;
+                ctx.leftClipId = clipId;
+                ctx.rightClipId = partner.partnerClipId;
+                ctx.currentLeftValue = ui.points.back().normValue;
+                ctx.currentRightValue = rightUi.points.front().normValue;
+                ctx.leftFadeOutControl = control;
+                ctx.rightFadeInControl = rightUi.boundary.fadeInControl;
+                ctx.requestedControl = control;
+                ctx.overlapDurationSec = partner.overlapDuration;
+
+                const auto res = solveLineCrossfade (ctx);
+                ui.boundary.fadeOutControl = res.leftFadeOutControl;
+                rightUi.boundary.fadeInControl = res.rightFadeInControl;
+            }
+            else
+            {
+                ui.boundary.fadeOutControl = control;
+            }
+        }
+
+        syncActiveLineCrossfades (clipId, false);
+        repaint();
+    }
+
+    void applyCrossfadeLevel (const std::string& clipId, bool isFadeIn, float requestedNormValue)
+    {
+        if (!uiStates.contains (clipId)) return;
+        auto& ui = uiStates[clipId];
+
+        if (isFadeIn)
+        {
+            if (!ui.points.empty())
+                ui.points.front().normValue = requestedNormValue;
+            const auto partner = findActiveCrossfadeForFadeIn (clipId);
+            if (partner.found && uiStates.contains (partner.partnerClipId))
+            {
+                auto& leftUi = uiStates[partner.partnerClipId];
+                LineCrossfadeContext ctx;
+                ctx.interaction = CrossfadeInteractionKind::levelChange;
+                ctx.modifiedClipId = clipId;
+                ctx.isLeftClipModified = false;
+                ctx.leftClipId = partner.partnerClipId;
+                ctx.rightClipId = clipId;
+                ctx.currentLeftValue = leftUi.points.back().normValue;
+                ctx.currentRightValue = requestedNormValue;
+                ctx.requestedValue = requestedNormValue;
+                ctx.leftFadeOutControl = leftUi.boundary.fadeOutControl;
+                ctx.rightFadeInControl = ui.boundary.fadeInControl;
+                ctx.overlapDurationSec = partner.overlapDuration;
+
+                const auto res = solveLineCrossfade (ctx);
+                ui.boundary.fadeInControl = res.rightFadeInControl;
+                leftUi.boundary.fadeOutControl = res.leftFadeOutControl;
+            }
+        }
+        else // fadeOut
+        {
+            if (!ui.points.empty())
+                ui.points.back().normValue = requestedNormValue;
+            const auto partner = findActiveCrossfadeForFadeOut (clipId);
+            if (partner.found && uiStates.contains (partner.partnerClipId))
+            {
+                auto& rightUi = uiStates[partner.partnerClipId];
+                LineCrossfadeContext ctx;
+                ctx.interaction = CrossfadeInteractionKind::levelChange;
+                ctx.modifiedClipId = clipId;
+                ctx.isLeftClipModified = true;
+                ctx.leftClipId = clipId;
+                ctx.rightClipId = partner.partnerClipId;
+                ctx.currentLeftValue = requestedNormValue;
+                ctx.currentRightValue = rightUi.points.front().normValue;
+                ctx.requestedValue = requestedNormValue;
+                ctx.leftFadeOutControl = ui.boundary.fadeOutControl;
+                ctx.rightFadeInControl = rightUi.boundary.fadeInControl;
+                ctx.overlapDurationSec = partner.overlapDuration;
+
+                const auto res = solveLineCrossfade (ctx);
+                ui.boundary.fadeOutControl = res.leftFadeOutControl;
+                rightUi.boundary.fadeInControl = res.rightFadeInControl;
+            }
+        }
+
+        syncActiveLineCrossfades (clipId, true);
+        repaint();
+    }
+
     explicit LineClipCanvas (
         LabComponent& h,
         const timeline_visual_style::CurveLineColourVariant colourVariant
@@ -506,7 +708,7 @@ private:
         return {};
     }
 
-    void syncActiveLineCrossfades (const std::string& modifiedClipId = {})
+    void syncActiveLineCrossfades (const std::string& modifiedClipId = {}, bool syncValue = false)
     {
         const auto sorted = getClipsSortedByZOrder();
         std::set<std::pair<std::string, std::string>> validPairs;
@@ -544,10 +746,22 @@ private:
                     leftUi.boundary.endValue    = rightUi.points.front().normValue;
                     rightUi.boundary.startValue = leftUi.points.back().normValue;
 
-                    if (modifiedClipId == left->id)
-                        rightUi.boundary.fadeInControl = leftUi.boundary.fadeOutControl;
-                    else if (modifiedClipId == right->id)
-                        leftUi.boundary.fadeOutControl = rightUi.boundary.fadeInControl;
+                    LineCrossfadeContext ctx;
+                    ctx.interaction = syncValue ? CrossfadeInteractionKind::levelChange : CrossfadeInteractionKind::boundaryResize;
+                    ctx.modifiedClipId = modifiedClipId;
+                    ctx.isLeftClipModified = (modifiedClipId == left->id);
+                    ctx.leftClipId = left->id;
+                    ctx.rightClipId = right->id;
+                    ctx.currentLeftValue = leftUi.points.back().normValue;
+                    ctx.currentRightValue = rightUi.points.front().normValue;
+                    ctx.requestedValue = (modifiedClipId == left->id) ? leftUi.points.back().normValue : rightUi.points.front().normValue;
+                    ctx.leftFadeOutControl = leftUi.boundary.fadeOutControl;
+                    ctx.rightFadeInControl = rightUi.boundary.fadeInControl;
+                    ctx.overlapDurationSec = ovEnd - ovStart;
+
+                    const auto res = solveLineCrossfade (ctx);
+                    leftUi.boundary.fadeOutControl = res.leftFadeOutControl;
+                    rightUi.boundary.fadeInControl = res.rightFadeInControl;
                 }
             }
         }
@@ -820,6 +1034,31 @@ private:
                         {
                             res.zone = TimelineClipZone::fadeOutCurveHandle;
                             return res;
+                        }
+
+                        // Rilevamento della curva partner visibile nell'area di overlap della top clip
+                        const auto ovInfo = findOverlapForTopClip (c.id);
+                        if (ovInfo.inCrossfade && !ovInfo.leftClipId.empty())
+                        {
+                            const auto leftClipIt = std::find_if (data.clips.begin(), data.clips.end(),
+                                                                  [&] (const Clip& clp) { return clp.id == ovInfo.leftClipId; });
+                            const auto leftUiIt = uiStates.find (ovInfo.leftClipId);
+                            if (leftClipIt != data.clips.end() && leftUiIt != uiStates.end() && !leftUiIt->second.points.empty())
+                            {
+                                const float cx0 = curveBounds.getX() + juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.startSec - c.start) / c.length)) * curveBounds.getWidth();
+                                const float cx1 = curveBounds.getX() + juce::jlimit (0.0f, 1.0f, static_cast<float> ((ovInfo.endSec - c.start) / c.length))   * curveBounds.getWidth();
+                                const float py0 = curveBounds.getBottom() - juce::jlimit (0.0f, 1.0f, leftUiIt->second.points.back().normValue) * curveBounds.getHeight();
+                                const float py1 = curveBounds.getBottom();
+                                const auto partnerSeg = makeBoundedCurvePixelSegment (
+                                    { cx0, py0 }, { cx1, py1 }, leftUiIt->second.boundary.fadeOutControl);
+
+                                if (partnerSeg.control.getDistanceFrom (p) <= 8.5f)
+                                {
+                                    res.clip = &(*leftClipIt);
+                                    res.zone = TimelineClipZone::fadeOutCurveHandle;
+                                    return res;
+                                }
+                            }
                         }
 
                         if (pts.size() >= 2 && ui.renderMode == LineClipRenderMode::continuousCurve)
@@ -1290,6 +1529,58 @@ private:
                 clips::enforceAutomationBoundaryPositions (
                     ui.points.data(), static_cast<int> (ui.points.size()),
                     ui.boundary.mode);
+
+                // Notifica il solver di crossfade per ricalcolare la maniglia coniugata della clip partner
+                if (draggedPointIdx == 0)
+                {
+                    const auto partner = findActiveCrossfadeForFadeIn (draggedClipId);
+                    if (partner.found && uiStates.contains (partner.partnerClipId))
+                    {
+                        auto& leftUi = uiStates[partner.partnerClipId];
+                        LineCrossfadeContext ctx;
+                        ctx.interaction = CrossfadeInteractionKind::levelChange;
+                        ctx.modifiedClipId = draggedClipId;
+                        ctx.isLeftClipModified = false;
+                        ctx.leftClipId = partner.partnerClipId;
+                        ctx.rightClipId = draggedClipId;
+                        ctx.currentLeftValue = leftUi.points.back().normValue;
+                        ctx.currentRightValue = currentNormY;
+                        ctx.requestedValue = currentNormY;
+                        ctx.leftFadeOutControl = leftUi.boundary.fadeOutControl;
+                        ctx.rightFadeInControl = ui.boundary.fadeInControl;
+                        ctx.overlapDurationSec = partner.overlapDuration;
+
+                        const auto res = solveLineCrossfade (ctx);
+                        ui.boundary.fadeInControl = res.rightFadeInControl;
+                        leftUi.boundary.fadeOutControl = res.leftFadeOutControl;
+                    }
+                }
+                else if (draggedPointIdx == static_cast<int> (ui.points.size()) - 1)
+                {
+                    const auto partner = findActiveCrossfadeForFadeOut (draggedClipId);
+                    if (partner.found && uiStates.contains (partner.partnerClipId))
+                    {
+                        auto& rightUi = uiStates[partner.partnerClipId];
+                        LineCrossfadeContext ctx;
+                        ctx.interaction = CrossfadeInteractionKind::levelChange;
+                        ctx.modifiedClipId = draggedClipId;
+                        ctx.isLeftClipModified = true;
+                        ctx.leftClipId = draggedClipId;
+                        ctx.rightClipId = partner.partnerClipId;
+                        ctx.currentLeftValue = currentNormY;
+                        ctx.currentRightValue = rightUi.points.front().normValue;
+                        ctx.requestedValue = currentNormY;
+                        ctx.leftFadeOutControl = ui.boundary.fadeOutControl;
+                        ctx.rightFadeInControl = rightUi.boundary.fadeInControl;
+                        ctx.overlapDurationSec = partner.overlapDuration;
+
+                        const auto res = solveLineCrossfade (ctx);
+                        ui.boundary.fadeOutControl = res.leftFadeOutControl;
+                        rightUi.boundary.fadeInControl = res.rightFadeInControl;
+                    }
+                }
+
+                syncActiveLineCrossfades (draggedClipId, true);
                 repaint();
                 return;
             }
@@ -1391,11 +1682,8 @@ private:
             const auto control = ayra::curves::makeBoundedQuadraticControl (
                 { segment.start.x, segment.start.y, segment.end.x, segment.end.y },
                 e.position.x, e.position.y);
-            if (fadeIn)
-                ui.boundary.fadeInControl = control;
-            else
-                ui.boundary.fadeOutControl = control;
-            repaint();
+
+            applyCrossfadeCurvature (draggedClipId, fadeIn, control);
             return;
         }
 
@@ -1824,15 +2112,13 @@ private:
 
         if (hit.zone == TimelineClipZone::fadeInCurveHandle)
         {
-            ui.boundary.fadeInControl = {};
-            repaint();
+            applyCrossfadeCurvature (hit.clip->id, true, { 0.5, 0.5, -1.0 });
             return;
         }
 
         if (hit.zone == TimelineClipZone::fadeOutCurveHandle)
         {
-            ui.boundary.fadeOutControl = {};
-            repaint();
+            applyCrossfadeCurvature (hit.clip->id, false, { 0.5, 0.5, -1.0 });
             return;
         }
     }
