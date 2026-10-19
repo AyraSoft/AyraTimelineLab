@@ -1,0 +1,21 @@
+name: Portable validation
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  sources:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Archive exact tracked sources (no Git credentials or working files)
+        run: git archive --format=zip --output=source-bundle.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-bundle
+          path: source-bundle.zip
+          retention-days: 3
