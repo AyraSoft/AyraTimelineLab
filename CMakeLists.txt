@@ -8,7 +8,7 @@ option(AYRA_LAB_SANITIZE "ASan + UBSan on the isolated test core (Clang/GCC)" OF
 option(AYRA_LAB_FETCH_JUCE "Explicit opt-in: download pinned JUCE 8.0.12" OFF)
 set(JUCE_SOURCE_DIR "" CACHE PATH "Existing official JUCE checkout (read-only)")
 set(AYRA_SOURCE_DIR "" CACHE PATH "Optional ayra_multiverse checkout: import canonical theme tokens read-only")
-set(AYRA_MODULES_DIR "/Users/Lavori/Juce/Juce Modules" CACHE PATH "Directory dei moduli Ayra canonici")
+set(AYRA_MODULES_DIR "$ENV{AYRA_MODULES_DIR}" CACHE PATH "Directory dei moduli Ayra canonici")
 
 add_library(ayra_lab_core STATIC core/LabModel.cpp generated/FixtureData.cpp)
 target_include_directories(ayra_lab_core PUBLIC core)
@@ -23,10 +23,17 @@ if(AYRA_LAB_SANITIZE AND NOT MSVC)
  target_link_options(ayra_lab_core PUBLIC -fsanitize=address,undefined)
 endif()
 include(CTest)
+add_subdirectory(modules/ayra_timeline_panel)
 if(BUILD_TESTING)
  add_executable(ayra_lab_tests tests/CoreTests.cpp)
  target_link_libraries(ayra_lab_tests PRIVATE ayra_lab_core)
  add_test(NAME core_regressions COMMAND ayra_lab_tests)
+ add_executable(ayra_timeline_panel_tests tests/TimelinePanelTests.cpp)
+ target_link_libraries(ayra_timeline_panel_tests PRIVATE ayra_timeline_panel ayra_lab_core)
+ add_test(NAME timeline_panel_contracts COMMAND ayra_timeline_panel_tests)
+ add_executable(ayra_panel_fixture_tests tests/PanelFixtureTests.cpp)
+ target_link_libraries(ayra_panel_fixture_tests PRIVATE ayra_timeline_panel ayra_lab_core)
+ add_test(NAME timeline_fixture_transactions COMMAND ayra_panel_fixture_tests)
  find_package(Python3 COMPONENTS Interpreter QUIET)
  if(Python3_Interpreter_FOUND)
   add_test(NAME fixture_sources COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/generate.py --check)
@@ -48,13 +55,13 @@ else()
  message(FATAL_ERROR "Set -DJUCE_SOURCE_DIR=/path/to/JUCE, or explicitly -DAYRA_LAB_FETCH_JUCE=ON. Core tests: -DAYRA_LAB_BUILD_GUI=OFF")
 endif()
 if(NOT EXISTS "${AYRA_MODULES_DIR}/ayra_curves/ayra_curves.h")
- message(FATAL_ERROR "AYRA_MODULES_DIR must contain ayra_curves")
+ message(FATAL_ERROR "AYRA_MODULES_DIR must contain ayra_curves; pass the path explicitly or via the environment")
 endif()
 juce_add_module("${AYRA_MODULES_DIR}/ayra_curves")
 juce_add_gui_app(AyraTimelineLab PRODUCT_NAME "Ayra Timeline Lab" COMPANY_NAME "Ayra Lab" BUNDLE_ID "com.ayra.timelinelab")
 target_sources(AyraTimelineLab PRIVATE
     app/Main.cpp
-    app/LabComponent.cpp
+    demo/TimelinePanelDemo.cpp
     app/clips/ayra_clips.cpp
     app/TrackHeader.cpp
     app/LabLookAndFeel.cpp
@@ -62,8 +69,9 @@ target_sources(AyraTimelineLab PRIVATE
     app/SessionCodec.cpp
     ayra_ui/ayra_ui.cpp
 )
+# TimelinePanelDemo.cpp includes LabComponent.cpp exactly once for the existing canvas classes.
 target_include_directories(AyraTimelineLab PRIVATE app generated ayra_ui)
-target_link_libraries(AyraTimelineLab PRIVATE ayra_lab_core ayra_curves juce::juce_gui_extra juce::juce_recommended_config_flags)
+target_link_libraries(AyraTimelineLab PRIVATE ayra_timeline_panel ayra_lab_core ayra_curves juce::juce_gui_extra juce::juce_recommended_config_flags)
 if(APPLE)
  target_link_libraries(AyraTimelineLab PRIVATE "-framework Accelerate")
 endif()
@@ -83,11 +91,7 @@ if(BUILD_TESTING)
  endif()
  add_test(NAME codec_regressions COMMAND ayra_lab_codec_tests)
 
- add_executable(ayra_lab_clip_tests
-     tests/ClipComponentTests.cpp
-     app/clips/ayra_clips.cpp
-     ayra_ui/ayra_ui.cpp
- )
+ add_executable(ayra_lab_clip_tests tests/ClipComponentTests.cpp app/clips/ayra_clips.cpp ayra_ui/ayra_ui.cpp)
  target_include_directories(ayra_lab_clip_tests PRIVATE app ayra_ui)
  target_link_libraries(ayra_lab_clip_tests PRIVATE ayra_curves juce::juce_gui_extra juce::juce_recommended_config_flags)
  if(APPLE)

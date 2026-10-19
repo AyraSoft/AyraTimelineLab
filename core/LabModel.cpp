@@ -168,6 +168,8 @@ Store::Store(Session s):current(std::move(s))
 void Store::notify() { if(changed) changed(); }
 bool Store::commit(Session candidate,std::string label)
 {
+    error = prepareCommit ? prepareCommit(current, candidate) : std::string{};
+    if (!error.empty()) { notify(); return false; }
     error=validate(candidate);
     if(!error.empty()) {notify();return false;}
     if(candidate==current)return false;

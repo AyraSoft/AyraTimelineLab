@@ -6,11 +6,13 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace ayra::lab
 {
+struct PanelFixtureMetadata; // Immutable, optional metadata for the separate timeline showcase.
 enum class Role { songTrack, performerTrack, performerMix, songMain };
 enum class Mode { grouped, free };
 enum class Selection { replace, toggle, range };
@@ -47,6 +49,7 @@ struct Session
     std::string active, selectedClip;
     std::vector<std::string> selected, manualOrder;
     std::vector<Track> tracks;
+    std::shared_ptr<const PanelFixtureMetadata> panelMetadata; // Not part of legacy Lab JSON v1.
     bool operator==(const Session&) const = default;
 };
 struct Capabilities
@@ -84,6 +87,9 @@ public:
     explicit Store(Session = makeFixture());
     const Session& state() const noexcept { return current; }
     std::function<void()> changed;
+    // Optional fixture-only preflight. May change the private candidate, never the live Store.
+    // Return an error to reject atomically; must not call commit/undo/redo or change callbacks.
+    std::function<std::string(const Session&, Session&)> prepareCommit;
     bool commit(Session candidate, std::string label);
     bool undo();
     bool redo();
