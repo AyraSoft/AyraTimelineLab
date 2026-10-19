@@ -1,0 +1,35 @@
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/timeline-work/build/debug
+[ 80%] Built target ayra_timeline_panel_tests
+[100%] Built target ayra_panel_fixture_tests
+Internal ctest changing into directory: /mnt/data/timeline-work/build/debug
+Test project /mnt/data/timeline-work/build/debug
+    Start 1: timeline_panel_contracts
+1/2 Test #1: timeline_panel_contracts .........   Passed    0.08 sec
+    Start 2: timeline_fixture_transactions
+2/2 Test #2: timeline_fixture_transactions ....   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.09 sec
+PASS 974 checks (presentation only; no native GUI claim)
+PASS 90 fixture/transaction checks
+[ 20%] Building CXX object CMakeFiles/ayra_timeline_panel_tests.dir/mnt/data/timeline-work/tests/TimelinePanelTests.cpp.o
+[ 40%] Building CXX object CMakeFiles/ayra_panel_fixture_tests.dir/mnt/data/timeline-work/tests/PanelFixtureTests.cpp.o
+[ 60%] Linking CXX executable ayra_timeline_panel_tests
+[ 60%] Built target ayra_timeline_panel_tests
+[ 80%] Linking CXX executable ayra_panel_fixture_tests
+[100%] Built target ayra_panel_fixture_tests
+Internal ctest changing into directory: /mnt/data/timeline-work/build/debug
+Test project /mnt/data/timeline-work/build/debug
+    Start 1: timeline_panel_contracts
+1/2 Test #1: timeline_panel_contracts .........   Passed    0.09 sec
+    Start 2: timeline_fixture_transactions
+2/2 Test #2: timeline_fixture_transactions ....   Passed    0.01 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   0.10 sec
+PASS 976 checks (presentation only; no native GUI claim)
+PASS 90 fixture/transaction checks

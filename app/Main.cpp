@@ -1,7 +1,8 @@
 /** @file Main.cpp
-    Applicazione GUI separata. Nessun dispositivo audio, rete o plugin scanner.
-    @see README.md, LabComponent */
+    Native timeline showcase by default. --legacy / --session retain the original
+    clip-design Lab and JSON v1. No device, decoder, plugin scanner or network. */
 #include "LabComponent.h"
+#include "../demo/TimelinePanelDemo.h"
 
 class TimelineLabApplication final : public juce::JUCEApplication
 {
@@ -11,9 +12,10 @@ public:
     bool moreThanOneInstanceAllowed()override{return true;}
     void initialise(const juce::String& commandLine)override
     {
-        window=std::make_unique<Window>();
-        if(commandLine.startsWith("--session "))
-            window->lab().loadFile(juce::File(commandLine.fromFirstOccurrenceOf("--session ",false,false).trim().unquoted()));
+        const bool loadSession=commandLine.startsWith("--session ");
+        window=std::make_unique<Window>(loadSession || commandLine.trim()=="--legacy");
+        if(loadSession && window->legacyLab!=nullptr)
+            window->legacyLab->loadFile(juce::File(commandLine.fromFirstOccurrenceOf("--session ",false,false).trim().unquoted()));
     }
     void shutdown()override{window.reset();}
     void systemRequestedQuit()override{quit();}
@@ -21,13 +23,15 @@ private:
     class Window final : public juce::DocumentWindow
     {
     public:
-        Window():juce::DocumentWindow("Ayra Timeline Lab",juce::Colour(0xff1b1f26),juce::DocumentWindow::allButtons)
+        explicit Window(bool legacy):juce::DocumentWindow("Ayra Timeline Lab",juce::Colour(0xff1b1f26),juce::DocumentWindow::allButtons)
         {
-            setUsingNativeTitleBar(true);auto* component=new ayra::lab::LabComponent;
-            setContentOwned(component,true);setResizable(true,true);setResizeLimits(1200,720,3840,2400);
+            setUsingNativeTitleBar(true);
+            if(legacy){legacyLab=new ayra::lab::LabComponent;setContentOwned(legacyLab,true);}
+            else setContentOwned(ayra::lab::makeTimelinePanelDemo().release(),true);
+            setResizable(true,true);setResizeLimits(1200,720,3840,2400);
             centreWithSize(1480,1040);setVisible(true);
         }
-        ayra::lab::LabComponent& lab(){return *static_cast<ayra::lab::LabComponent*>(getContentComponent());}
+        ayra::lab::LabComponent* legacyLab=nullptr;
         void closeButtonPressed()override{juce::JUCEApplication::getInstance()->systemRequestedQuit();}
     };
     std::unique_ptr<Window> window;
