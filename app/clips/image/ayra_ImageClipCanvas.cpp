@@ -2503,7 +2503,7 @@ private:
     loopPreview = {};
   }
 
-  juce::Array<juce::Image> sampleThumbnails{loadSampleThumbnails()};
+  juce::Array<juce::Image> sampleThumbnails = loadSampleThumbnails();
 
   ClipFeatures clipFeatures;
   LabComponent &host;
