@@ -1,0 +1,29 @@
+name: Native dependency bundle
+on:
+  push:
+    paths: ['.github/workflows/native-dependencies.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare pinned public sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch 8.0.12 https://github.com/juce-framework/JUCE.git JUCE
+          git -C JUCE rev-parse HEAD > JUCE_REVISION.txt
+          git -C JUCE archive --format=tar HEAD | gzip > JUCE.tar.gz
+          git init blur
+          git -C blur fetch --depth 1 https://github.com/sudara/melatonin_blur.git fcc18578d9db3f9400c74ee1bb2eb1070ee959f9
+          git -C blur archive --format=tar FETCH_HEAD | gzip > melatonin_blur.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-public-dependencies
+          path: |
+            JUCE.tar.gz
+            JUCE_REVISION.txt
+            melatonin_blur.tar.gz
+          retention-days: 3
