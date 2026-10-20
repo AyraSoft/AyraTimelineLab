@@ -5,23 +5,94 @@
 #include "../app/LabComponent.cpp"
 #include "TimelinePanelDemo.h"
 #include "PanelFixture.h"
+#include "PanelClipWindow.h"
+#include "TimelineIdentityArtwork.h"
 #include "../modules/ayra_timeline_panel/TimelinePanel.h"
 
 namespace ayra::lab
 {
 namespace
 {
-template<class Canvas>
-panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent& legacy)
+// Artwork is an adapter to the same public Ayra primitives already used by this
+// Lab. No copied meter renderer, recessed recipe, accent painter or icon data.
+class PanelArtwork final : public panel::TimelinePanelLookAndFeel
 {
-    auto* raw=component.get();
-    panel::LaneCanvas result;
-    result.bind=[raw,&legacy](const panel::Lane& lane,const panel::CanvasFrame& frame)
+    class RecessedIcon final : public ayra::ShapeIconButton
     {
+    public:
+        explicit RecessedIcon(const juce::String& label = {}) : ShapeIconButton(label)
+        { setDrawBackground(false); setIconPadding(0.22f); }
+        void paintButton(juce::Graphics& g, bool over, bool down) override
+        { ayra::drawFlagToolbarWell(g,getLocalBounds().toFloat()); ShapeIconButton::paintButton(g,over,down); }
+    };
+    class RecessedLetter final : public juce::Button
+    {
+    public:
+        RecessedLetter(juce::String label, LabLookAndFeel& look):Button(label),laf(look){}
+        void paintButton(juce::Graphics& g,bool over,bool down) override
+        {
+            ayra::drawFlagToolbarWell(g,getLocalBounds().toFloat());
+            const auto& p=laf.colours();
+            g.setColour(getToggleState()?(getName()=="M"?p.mute:p.solo):(over||down?p.value:p.text));
+            g.setFont(juce::Font(juce::FontOptions().withHeight(12.0f).withStyle("Bold")));
+            g.drawText(getName(),getLocalBounds(),juce::Justification::centred);
+        }
+    private: LabLookAndFeel& laf;
+    };
+public:
+    explicit PanelArtwork(LabLookAndFeel& look):laf(look){}
+    std::unique_ptr<juce::Button> makeButton(panel::LaneButton kind) override
+    {
+        using B=panel::LaneButton;
+        if(kind==B::mute||kind==B::solo)return std::make_unique<RecessedLetter>(kind==B::mute?"M":"S",laf);
+        auto result=std::make_unique<RecessedIcon>();
+        if(kind==B::open)result->setGlyph(ayra::glyphs::window);
+        else if(kind==B::monitoring)result->setGlyph(ayra::glyphs::audio);
+        else {
+            auto path=ayra::glyphs::rewind.path();
+            if(kind==B::next)path.applyTransform(juce::AffineTransform::scale(-1.0f,1.0f));
+            result->setShape(std::move(path));
+        }
+        return result;
+    }
+    juce::Image prepareIdentity(const panel::TimelineIdentityContent& c,const panel::TimelineIdentityLayout& layout)const override
+    {return TimelineIdentityArtwork::prepare(c,layout);}
+    void drawIdentity(juce::Graphics& g,const panel::TimelineIdentityContent& c,const panel::TimelineIdentityLayout& layout,const juce::Image& image)const override
+    {TimelineIdentityArtwork::draw(g,c,layout,image);}
+    void drawAccent(juce::Graphics& g,juce::Rectangle<float> r,juce::Colour c) const override
+    { juce::Path clip;clip.addRoundedRectangle(r,2.0f);ayra::drawAccentSpine(g,r,clip,c,r.getWidth()); }
+    void drawMeter(juce::Graphics& g,juce::Rectangle<float> r,float value) const override
+    { laf.drawVMeter(g,r,value); }
+private: LabLookAndFeel& laf;
+};
+using PanelCanvasStates=std::map<std::pair<panel::Id,panel::VisualKind>,std::shared_ptr<void>>;
+template<class Canvas>
+panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent& legacy,
+                                  PanelCanvasStates& states,const panel::Lane& sourceLane)
+{
+    auto* raw=component.get();const auto key=std::make_pair(sourceLane.id,sourceLane.visual);
+    if(const auto it=states.find(key);it!=states.end())raw->restorePanelState(it->second);
+    panel::LaneCanvas result;
+    result.saveState=[raw,&states,key]{states[key]=raw->capturePanelState();};
+    result.hasInteraction=[raw]{return raw->isMouseButtonDown(true)||raw->hasKeyboardFocus(true);};
+    if constexpr(requires {raw->panelEventTimes();})result.eventTimes=[raw]{return raw->panelEventTimes();};
+    auto window=std::make_shared<PanelClipWindow>();
+    result.bind=[raw,&legacy,window](const panel::Lane& lane,const panel::CanvasFrame& frame)
+    {
+        raw->panelView.enabled=true;raw->panelView.time=frame.time;
+        raw->panelView.selected=frame.selected;raw->panelView.ownerColour=juce::Colour(frame.ownerColour);
+        if constexpr(requires {raw->setWarpFeatureEnabled(true);})raw->setWarpFeatureEnabled(legacy.isWarpFeatureEnabled());
+        if constexpr(requires {raw->setGainFeatureEnabled(true);})raw->setGainFeatureEnabled(legacy.isGainFeatureEnabled());
+        if constexpr(requires {raw->setOverlayFeatureEnabled(true);})raw->setOverlayFeatureEnabled(legacy.isGainFeatureEnabled());
         if(const auto* source=findTrack(legacy.store().state(),lane.id))
         {
-            auto projection=*source;projection.height=frame.height;
-            raw->setModel(projection,frame.height);
+            if constexpr(requires {raw->panelEventTimes();})raw->setModel(*source,frame.height);
+            else {
+                window->update(*source,frame.revision);raw->panelView.canonicalClipIds=window->canonicalIds;
+                auto wanted=window->visible(frame.time,frame.width,juce::Component::isMouseButtonDownAnywhere());
+                if constexpr(requires {raw->includePanelPartners(wanted);})raw->includePanelPartners(wanted);
+                auto projection=window->projection(wanted,frame.height);raw->setModel(projection,frame.height);
+            }
         }
     };
     result.component=std::move(component);return result;
@@ -43,7 +114,17 @@ public:
         if(!initial)throw std::invalid_argument(initial.message);
         for(const auto& lane:controller.snapshot().lanes)
             if(const auto* track=findTrack(legacy.store().state(),lane.id))previousLegacyHeights[lane.id]=track->height;
-        surface=std::make_unique<panel::TimelinePanel>(controller,[this](const auto& lane){return makeCanvas(lane);});
+        controller.setMode(panel::Mode::freeLanes);
+        surface=std::make_unique<panel::TimelinePanel>(controller,[this](const auto& lane){return makeCanvas(lane);},artwork);
+        surface->readMeter=[](const panel::Lane& lane,bool input){
+            // Explicitly synthetic READOUT for style testing, never labelled live audio.
+            panel::MeterReadback r;r.available=true;
+            r.count=std::min(8,input?lane.inputMeterCount:lane.outputMeterCount);
+            const double seconds=juce::Time::getMillisecondCounterHiRes()*0.001;
+            const double seed=static_cast<double>(std::hash<std::string>{}(lane.owner)%100)/10.0;
+            for(int i=0;i<r.count;++i)r.values[static_cast<std::size_t>(i)]=static_cast<float>(0.15+0.7*std::abs(std::sin(seconds*1.7+seed+i+(input?0.0:0.4))));
+            return r;
+        };
         surface->onResult=[this](const auto& r){report(r);};
         surface->onSelectionChanged=[this]{updateStatus();};
         surface->onSeek=[this](double){updateStatus();}; // No transport or audio engine in this showcase.
@@ -56,6 +137,7 @@ public:
         addButton(undoView,[this]{controller.undoView();surface->refresh();updateStatus();});
         addButton(redoView,[this]{controller.redoView();surface->refresh();updateStatus();});
         addButton(theme,[this]{dark=!dark;applyStyle();});
+        addButton(visibility,[this]{surface->showVisibilityMenu(visibility);});
         addButton(chooseClips,[this]{chooseEvents();});
         addButton(groupClips,[this]{edit(panel::CommandKind::temporalGroup);});
         addButton(dissolve,[this]{edit(panel::CommandKind::dissolveGroup);});
@@ -90,7 +172,7 @@ public:
             b->setBounds(first.removeFromLeft(106).reduced(2));
         zoom.setBounds(first.removeFromRight(160).reduced(2));search.setBounds(first.reduced(2));
         auto second=area.removeFromTop(30);
-        for(auto* b:{&chooseClips,&groupClips,&dissolve,&link,&unlink,&undoEdit,&redoEdit,&colours,&warp,&gain})
+        for(auto* b:{&chooseClips,&groupClips,&dissolve,&link,&unlink,&undoEdit,&redoEdit,&colours,&warp,&gain,&visibility})
             b->setBounds(second.removeFromLeft(104).reduced(2));
         status.setBounds(area.removeFromBottom(30));surface->setBounds(area);
     }
@@ -106,6 +188,8 @@ public:
     }
 private:
     LabComponent legacy; // owns the approved LAF and the compatibility Store, not a second musical document
+    PanelArtwork artwork{legacy.look()};
+    PanelCanvasStates canvasStates;
     panel::Controller controller;
     std::unique_ptr<PanelFixtureHost> bridge;
     std::unique_ptr<panel::TimelinePanel> surface;
@@ -113,13 +197,13 @@ private:
     juce::TextButton undoView{"Undo vista"},redoView{"Redo vista"},theme{"Tema"};
     juce::TextButton chooseClips{"Clip..."},groupClips{"Group tempo"},dissolve{"Dissolve"},link{"Link clip"},unlink{"Unlink"};
     juce::TextButton undoEdit{"Undo edit"},redoEdit{"Redo edit"},colours{"Colori tipo"},warp{"Warp"},gain{"Gain"};
+    juce::TextButton visibility{"Visibilita"};
     juce::Slider zoom;juce::TextEditor search;juce::Label status;
     juce::TooltipWindow tooltips{this,350};
     std::vector<panel::EventRef> selectedEvents;
-    std::vector<std::function<void()>> featureUpdates;
     std::map<std::string,int> previousLegacyHeights;
     bool dark=true,warpOn=true,gainOn=true;unsigned groupSequence=0;
-    std::string message="Seleziona l'accento; trascina dal bordo sinistro; ridimensiona il separatore. Nessun meter.";
+    std::string message="Accento: selezione/riordino. Bordo inferiore: resize. Doppio click sul nome: rinomina. Meter sintetici opzionali.";
     template<class F>void addButton(juce::TextButton& b,F f){b.onClick=std::move(f);addAndMakeVisible(b);}
     static bool localPreview(const panel::Lane& lane)
     {return lane.visual==panel::VisualKind::point || lane.visual==panel::VisualKind::span || lane.visual==panel::VisualKind::continuous;}
@@ -134,39 +218,31 @@ private:
     panel::LaneCanvas makeCanvas(const panel::Lane& lane)
     {
         using V=panel::VisualKind;
-        if(lane.visual==V::audio)
-        {
-            auto c=std::make_unique<AudioClipCanvas>(legacy);auto* ptr=c.get();
-            featureUpdates.push_back([this,ptr]{ptr->setWarpFeatureEnabled(warpOn);ptr->setGainFeatureEnabled(gainOn);});
-            featureUpdates.back()();return wrapPanelCanvas(std::move(c),legacy);
-        }
-        if(lane.visual==V::midi)
-        {
-            auto c=std::make_unique<MidiClipCanvas>(legacy);auto* ptr=c.get();
-            featureUpdates.push_back([this,ptr]{ptr->setWarpFeatureEnabled(warpOn);ptr->setOverlayFeatureEnabled(gainOn);});
-            featureUpdates.back()();return wrapPanelCanvas(std::move(c),legacy);
-        }
-        if(lane.visual==V::image)
-        {
-            auto c=std::make_unique<ImageClipCanvas>(legacy);auto* ptr=c.get();
-            featureUpdates.push_back([this,ptr]{ptr->setWarpFeatureEnabled(warpOn);ptr->setGainFeatureEnabled(gainOn);});
-            featureUpdates.back()();return wrapPanelCanvas(std::move(c),legacy);
-        }
-        if(lane.visual==V::line)
-            return wrapPanelCanvas(std::make_unique<LineClipCanvas>(legacy,timeline_visual_style::CurveLineColourVariant::light,
-                TimelineCurveUnderlayStyle::darkBelow),legacy);
+        const auto wrap=[&](auto c){return wrapPanelCanvas(std::move(c),legacy,canvasStates,lane);};
+        if(lane.visual==V::audio)return wrap(std::make_unique<AudioClipCanvas>(legacy));
+        if(lane.visual==V::midi)return wrap(std::make_unique<MidiClipCanvas>(legacy));
+        if(lane.visual==V::image)return wrap(std::make_unique<ImageClipCanvas>(legacy));
+        if(lane.visual==V::line)return wrap(std::make_unique<LineClipCanvas>(legacy,
+            timeline_visual_style::CurveLineColourVariant::light,TimelineCurveUnderlayStyle::darkBelow));
         panel::LaneCanvas result;
-        if(lane.visual==V::continuous)
-        {
+        if(lane.visual==V::continuous) {
             auto c=std::make_unique<ContinuousLineCanvas>(legacy,timeline_visual_style::CurveLineColourVariant::tempoTeal);
             if(lane.id=="tempo")c->setRange(40.0f,220.0f,120.0f,1);
-            result=wrapPanelCanvas(std::move(c),legacy);
+            result=wrap(std::move(c));
+        } else {
+            auto c=std::make_unique<KeyframeLaneCanvas>(legacy,
+                lane.visual==V::point?KeyframeLaneType::points:KeyframeLaneType::contiguousSpans);
+            const auto neutral=legacy.look().colours().secondary;
+            if(lane.id=="range")c->setPanelEvents({{1,0,32,0,"Song range",neutral,false}});
+            if(lane.id=="markers")c->setPanelEvents({{1,0,0,0,"Intro",neutral,false},{2,8,0,0,"Verse",neutral,false},{3,18,0,0,"Chorus",neutral,false}});
+            if(lane.id=="timesig")c->setPanelEvents({{1,0,0,0,"4/4",neutral,false},{2,16,0,0,"3/4",neutral,false},{3,24,0,0,"4/4",neutral,false}});
+            if(lane.id=="counter")c->setPanelEvents({{1,0,0,0,"4",neutral,false},{2,0.5,0,0,"3",neutral,false},{3,1,0,0,"2",neutral,false},{4,1.5,0,0,"1",neutral,false}});
+            result=wrap(std::move(c));
         }
-        else result=wrapPanelCanvas(std::make_unique<KeyframeLaneCanvas>(legacy,
-            lane.visual==V::point?KeyframeLaneType::points:KeyframeLaneType::contiguousSpans),legacy);
         result.supportsDocumentEvents=false;return result;
     }
-    void updateFeatures(){for(auto& update:featureUpdates)update();warp.setToggleState(warpOn,juce::dontSendNotification);gain.setToggleState(gainOn,juce::dontSendNotification);}
+    void updateFeatures()
+    { surface->invalidateCanvasFrames();warp.setToggleState(warpOn,juce::dontSendNotification);gain.setToggleState(gainOn,juce::dontSendNotification); }
     void handleAsyncUpdate()override
     {
         const auto adopted=controller.adopt(surfaceSnapshot());
@@ -181,14 +257,15 @@ private:
                 previousLegacyHeights[lane.id]=t->height;
             }
         std::erase_if(selectedEvents,[this](const auto& ref){return controller.event(ref)==nullptr;});
-        applyStyle();surface->refresh();updateStatus();
+        surface->refresh();updateStatus();
     }
     void applyStyle()
     {
         legacy.look().setDark(dark);const auto& p=legacy.look().colours();panel::PanelStyle style;
+        style.identityTypography=TimelineIdentityArtwork::typography();
         style.background=p.base;style.seam=p.raised;style.foreground=p.text;style.border=p.border;
         style.streamColour=[this](panel::Stream stream)
-        {return juce::Colour(legacy.store().state().panelMetadata->streamColours.at(static_cast<std::size_t>(stream)));};
+        {return stream==panel::Stream::global?legacy.look().colours().secondary:juce::Colour(legacy.store().state().panelMetadata->streamColours.at(static_cast<std::size_t>(stream)));};
         surface->setStyle(std::move(style));status.setColour(juce::Label::textColourId,p.secondary);repaint();
     }
     void changeMode(panel::Mode m)
@@ -203,7 +280,7 @@ private:
         free.setToggleState(controller.view().mode==panel::Mode::freeLanes,juce::dontSendNotification);
         std::string selection;
         for(const auto& ref:selectedEvents){if(!selection.empty())selection+=" | ";selection+=ref.clip;}
-        status.setText(panel::text(message)+"   ["+juce::String(static_cast<int>(selectedEvents.size()))+" clip] "+panel::text(selection),juce::dontSendNotification);
+        status.setText(juce::String(legacy.look().sourceLabel())+" | "+panel::text(message)+"   ["+juce::String(static_cast<int>(selectedEvents.size()))+" clip] "+panel::text(selection),juce::dontSendNotification);
     }
     void groupSelectedLanes()
     {
@@ -229,7 +306,7 @@ private:
                     for(auto* p=owner;p;p=controller.owner(p->parent))if(controller.view().collapsedOwners.contains(p->id))unfold.push_back(p->id);
                     for(const auto& id:unfold)controller.toggleCollapse(id);
                 }
-                controller.select(lane.id,panel::Controller::Selection::replace);surface->refresh();surface->revealLane(lane.id);updateStatus();return;
+                surface->revealLane(lane.id);updateStatus();return;
             }
         }
     }

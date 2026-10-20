@@ -8,6 +8,7 @@
 #include "SessionCodec.h"
 #include "clips/ayra_clips.h"
 #include <map>
+#include "CanvasViewportBinding.h"
 
 namespace ayra::lab
 {

@@ -1,0 +1,233 @@
+{
+  "base_commit": "b214bcc7f960bab44d5e66f4827d8615a813c739",
+  "base_tree": "a84ef99e1e71dbadbbeac1a0fa77a4555f76b506",
+  "publication": "local candidate; remote main is not changed by this manifest",
+  "native_binary_sha256": "ecda24ba47f8224bbb282b78648e92b683bdf15f78b20808a449fbef092008a1",
+  "source_files": [
+    {
+      "path": "CMakeLists.txt",
+      "bytes": 5909,
+      "sha256": "04b80ff4c6b8c7a03e8ea39d722fe0759f3ad632319c6ea9fc28819f1a5f2c58",
+      "git_blob": "cf4fa0f092f7f80b04a62aa07e0ead42bb889021"
+    },
+    {
+      "path": "README.md",
+      "bytes": 4021,
+      "sha256": "488ed6c9e953fc09663e68b8d844ac57380857599bd17a21f5f434a21055369d",
+      "git_blob": "91ed1217e21cd8d539050f4c9aa7a9e6b3aac458"
+    },
+    {
+      "path": "app/LabComponent.h",
+      "bytes": 4287,
+      "sha256": "f30f7750390d878f929aded4456fe2a4d41fdb6ffc0e784df151826a79c43f21",
+      "git_blob": "708d19f2e5d7971b9cfc57d40dcc8efc95a8b969"
+    },
+    {
+      "path": "app/LabLookAndFeel.cpp",
+      "bytes": 6642,
+      "sha256": "d7dca5ba29bc84a4512efc8f707f5c788a624659ebd264bc3eb63d317988caa6",
+      "git_blob": "9f03da5d5884d4043d1f17513dd7e09def61261f"
+    },
+    {
+      "path": "app/LabLookAndFeel.h",
+      "bytes": 1824,
+      "sha256": "9dc1535027574247e34e32acae91a08c02b8e77ee28b6250e33dc52ee9ea7221",
+      "git_blob": "617b42aa1f1dac548278fc2ce033faffdf194256"
+    },
+    {
+      "path": "app/Main.cpp",
+      "bytes": 2228,
+      "sha256": "ab5f72c4fb70ee082b302c475e239444ffaca4a7d06fb690a74bf76fd9622bf6",
+      "git_blob": "3c5ffc148ffb7bc5ef31f3968f3f3dfe4a06fce3"
+    },
+    {
+      "path": "app/clips/audio/ayra_AudioClipCanvas.cpp",
+      "bytes": 110942,
+      "sha256": "c2c0d4a18fd66a681e0c73d932b28fe70ff005eddb36ddb297f1408500145ff0",
+      "git_blob": "69ac9e5e821d4c41255854a2cf40a835bd20fe75"
+    },
+    {
+      "path": "app/clips/continous/ayra_ContinuousLineCanvas.cpp",
+      "bytes": 29111,
+      "sha256": "6d0f83d5773c957cfc830a1b09f791918757826589d8e0ab7f4da6f4f709057d",
+      "git_blob": "0c05511e2f4ec6d0ef6379ab8c12c2ce7ce43027"
+    },
+    {
+      "path": "app/clips/image/ayra_ImageClipCanvas.cpp",
+      "bytes": 104284,
+      "sha256": "082a9f90e21d8fcedc337754cc7a60f5d4887952460137877a5ab4b54b28757c",
+      "git_blob": "02185dc2148db527a140e6bab13c097df9d17d52"
+    },
+    {
+      "path": "app/clips/keyframe/ayra_KeyframeLaneCanvas.cpp",
+      "bytes": 49111,
+      "sha256": "8ffe661ef92205774217114d120684c5bb60dae6ce2416d5aa94903c258942d4",
+      "git_blob": "06b0747fb7188dad5bd924f26f246d933dff30ef"
+    },
+    {
+      "path": "app/clips/line/ayra_LineClipCanvas.cpp",
+      "bytes": 96177,
+      "sha256": "c8ecb32bc8c3472f78a9fc424a1a853b054c7be7649088276830022fea60c20a",
+      "git_blob": "09a64f921dbd24de1deda68f582c6bc4110edae1"
+    },
+    {
+      "path": "app/clips/midi/ayra_MidiClipCanvas.cpp",
+      "bytes": 99631,
+      "sha256": "861803925f608500ed3f84ff5a23355726d652a45627779e30271fde724ab786",
+      "git_blob": "37512cca60a21fd79551efc490f8eee0f773145f"
+    },
+    {
+      "path": "demo/PanelFixture.h",
+      "bytes": 19169,
+      "sha256": "1c24cbd3b0d4c6536fa1bd280f82cfe6ec5adc5697c0af78020ec082a8b5a89c",
+      "git_blob": "056e97b7958d18fd447028b391c60ded1d184bf1"
+    },
+    {
+      "path": "demo/TimelinePanelDemo.cpp",
+      "bytes": 24057,
+      "sha256": "3ad5530384fd56e7f8dc72e88caad47eb75239ef2e5949cf0e6af7e119b1f696",
+      "git_blob": "6ed9feb2bfb5b3bbf9ef611cbd6280994ac69148"
+    },
+    {
+      "path": "docs/TIMELINE_PANEL_IMPLEMENTATION.md",
+      "bytes": 6068,
+      "sha256": "7fac6bac38567476113090a4b2ced88400dc4ea48eeb2d6e434f9eee63f9e022",
+      "git_blob": "62093fbb6e37374ea0cdfaca349cde3fc30ff4c6"
+    },
+    {
+      "path": "fixtures/session.json",
+      "bytes": 12761,
+      "sha256": "ce29b47bbe0865cc870b1f8eb0a6a5cd33d2f55c67e413eb0c6a8fdb95fd6543",
+      "git_blob": "b680c66053bef113bda380f4ac61b804cf156f4b"
+    },
+    {
+      "path": "modules/ayra_timeline_panel/CMakeLists.txt",
+      "bytes": 1596,
+      "sha256": "6937b0d9d23fc4c78096e07329e02493a3a7f8cd64322972a1d7734d36fe6d26",
+      "git_blob": "afd90bd09aa206c78db82746bbe052af54bb5454"
+    },
+    {
+      "path": "modules/ayra_timeline_panel/README.md",
+      "bytes": 5549,
+      "sha256": "6d91af4af764b0d7b1debcfe5be18f2a8ec641d247bbe1d2070cd6f2e5448351",
+      "git_blob": "f2ebf86ca84db11b1af9a7de670afa2cbd8a9992"
+    },
+    {
+      "path": "modules/ayra_timeline_panel/TimelineModel.h",
+      "bytes": 32545,
+      "sha256": "ee76406e11df99063c088284e6e714b2f3ddb222ff3d3cf76446dbca995bdc58",
+      "git_blob": "8eed50149533da3e467a2cd4535edb8cb8dc6c7c"
+    },
+    {
+      "path": "modules/ayra_timeline_panel/TimelinePanel.h",
+      "bytes": 34001,
+      "sha256": "2a76264e715049642ca65cd7f6e994213622963e406773b1455713665829d3c3",
+      "git_blob": "d753b0eef067825782d9eabeccc19179f86df893"
+    },
+    {
+      "path": "run.command",
+      "bytes": 2752,
+      "sha256": "dda82be64120f9a768a7e2f589a59c4c238c62f7319fa70294080f31b217fc64",
+      "git_blob": "cb7261853f83e4a659912c481e6bb8b6f3feb2f2"
+    },
+    {
+      "path": "tests/PanelFixtureTests.cpp",
+      "bytes": 8730,
+      "sha256": "0eb8e356ad3ebe2c4a6492e389580f1d12e19c00198f8efa26d5908cc851f83f",
+      "git_blob": "9d09d2ea318682a8b1335383833d9eea7be36293"
+    },
+    {
+      "path": "tests/TimelinePanelTests.cpp",
+      "bytes": 12272,
+      "sha256": "4271a14d7ce26dbbba0112a6142f0a8c9b25880b40a38b86ea7e3f81ead01c5a",
+      "git_blob": "ee07fdcaaa17f73c672844c0daa7ee9cf61defb6"
+    },
+    {
+      "path": "tools/check_panel_boundary.py",
+      "bytes": 1322,
+      "sha256": "797638f6e3f2734844cc382a69f596be3a0f246820017a88d8d4bf16b5847366",
+      "git_blob": "8f8b0bda02b4ee993892eeccbe87367e04bd87bb"
+    },
+    {
+      "path": "web/ayra-header-lab.html",
+      "bytes": 71503,
+      "sha256": "6f58801c79aaf1d57a18ed63afc0241631376b315daf95d7a0899de7b809b94e",
+      "git_blob": "226ad86095419841922f7670bbd520cfc563dac0"
+    },
+    {
+      "path": "app/CanvasViewportBinding.h",
+      "bytes": 1664,
+      "sha256": "dbba91b1332a2bc04a9bec8593d0847eec772916e58b2964802e916d52b425f1",
+      "git_blob": "a760bf3ecc41e55297351d8c87a7bc7098cdd261"
+    },
+    {
+      "path": "demo/PanelClipWindow.h",
+      "bytes": 2115,
+      "sha256": "d455eaeda853889ecdbd435119466255e6709a192c9f93325f1fd59baa7841d4",
+      "git_blob": "b43c8153321c4a904012a2cb446349b07ebe45ef"
+    },
+    {
+      "path": "tests/NativePanelTests.cpp",
+      "bytes": 9184,
+      "sha256": "53adf40b560e30e8756e4d756e0a3c5ea0ac4dace2bde2adbc97a7af47a43366",
+      "git_blob": "ecd4682d6f359c154ab420c2bfe5ecec4decdf97"
+    }
+  ],
+  "external_provider_hashes_only": [
+    {
+      "provider": "ayra_timeline",
+      "path": "ayra_timeline_presentation.h",
+      "sha256": "bf788674946a326cd98cdcc7d89bba563a4e5027a771eb1619b96c1c45368161",
+      "git_blob": "6f40b170f41bba4dbf974e512fe64ee2e8ce935d"
+    },
+    {
+      "provider": "ayra_timeline",
+      "path": "timeline/widgets/component/ayra_TimelineIntervalIndex.h",
+      "sha256": "299a8aacb95d25b48e4832c58dc74ba1b65ef33398db1b89a407e2b07fcb7b5f",
+      "git_blob": "19932824b32e20aea3efde0e40a7954c1d49b3bb"
+    },
+    {
+      "provider": "ayra_timeline",
+      "path": "timeline/widgets/component/ayra_TimelineLaneChrome.h",
+      "sha256": "470ee4e2000058d747cd071694437edca974c54db8367ed8c2fba21f0d393eea",
+      "git_blob": "c763c16f011e031c17db674097eb533c35e9c5b8"
+    },
+    {
+      "provider": "ayra_timeline",
+      "path": "timeline/widgets/component/ayra_TimelineRowIndex.h",
+      "sha256": "9578ec3014439dd0eb87f592e8b3f9374983a3710222a42c736fcd91126ecb7b",
+      "git_blob": "1781ed89236d9647c617cd82f7af12b867ba6441"
+    },
+    {
+      "provider": "ayra_timeline",
+      "path": "timeline/widgets/component/ayra_TimelineRowResidency.h",
+      "sha256": "087754e7bbd043859b0cc46bfbcf855545486c94ad4c95a7617a292c81a8750d",
+      "git_blob": "1e6ab44cbe74a046d20b7ca9f6dfe22882047fa5"
+    },
+    {
+      "provider": "ayra_timeline",
+      "path": "timeline/widgets/component/ayra_TimelineTimeWindow.h",
+      "sha256": "0bec02b66a4de10e32f17e4409d054f502a348364673d7838d6ceff2c98649c4",
+      "git_blob": "f8de7c59e09a455f29c99980a49d4c21e5aaafce"
+    },
+    {
+      "provider": "ayra_curves",
+      "path": "ayra_curves.cpp",
+      "sha256": "3092627cf279aa272611052b07890a9ae3e4dd90896d1db429765d9b89a1917c",
+      "git_blob": "9540f1175813f3eba50c1232b25f8640dae0b48e"
+    },
+    {
+      "provider": "ayra_curves",
+      "path": "ayra_curves.h",
+      "sha256": "d4af8a50d59b90ff273e7852ee9ea288d5d7091db7c36593252cebfae5f13672",
+      "git_blob": "ffe2836a8fd19d1b78b788ba9b2344c99e0d2927"
+    },
+    {
+      "provider": "ayra_curves",
+      "path": "curves/ayra_CurveSegment.h",
+      "sha256": "e8fda0201c35f86b3803587f9a97ce9e799d2c1071fdaa52b4b445ce5acd8b0d",
+      "git_blob": "0a2b3c6ac6822d2fdc4c1ff4c9d5b3ce95e634f7"
+    }
+  ],
+  "font_files_distributed": false
+}

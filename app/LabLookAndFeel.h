@@ -5,6 +5,7 @@
     @see CanonicalTheme.cpp, generated/ThemeData.h */
 #pragma once
 #include "ayra_ui.h"
+#include "SharedChromeLookAndFeel.h"
 #include "LabModel.h"
 #include "clips/ayra_clips.h"
 #include <array>
@@ -25,8 +26,7 @@ using Peaks=std::array<Peak,256>;
 juce::Path makeSyntheticShape(int seed);
 Peaks makeSyntheticPeaks(int seed); // only fixture setup; never decode or synthesize in paint.
 
-class LabLookAndFeel : public juce::LookAndFeel_V4,
-                       public ayra::CommonDefaultLookAndFeel,
+class LabLookAndFeel : public SharedChromeLookAndFeel,
                        public clips::ClipLookAndFeelMethods
 {
 public:
@@ -37,9 +37,11 @@ public:
     const Palette& colours() const noexcept {return palette;}
     const char* sourceLabel() const noexcept;
     void drawHeader(juce::Graphics&, juce::Rectangle<int>, const Track&, bool selected);
-    void drawTrackGrid(juce::Graphics&, juce::Rectangle<int>, double pixelsPerSecond) const;
+    void drawTrackGrid(juce::Graphics&, juce::Rectangle<int>, double pixelsPerSecond, double originX=0.0) const;
+#if !AYRA_LAB_VISUALS_FROM_MULTIVERSE
     void drawButtonBackground(juce::Graphics&,juce::Button&,const juce::Colour&,bool,bool) override;
     void drawButtonText(juce::Graphics&,juce::TextButton&,bool,bool) override;
+#endif
 private:
     Palette palette;
     bool dark=true;

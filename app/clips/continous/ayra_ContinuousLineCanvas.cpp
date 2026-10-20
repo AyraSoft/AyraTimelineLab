@@ -18,6 +18,16 @@ class ContinuousLineCanvas final : public juce::Component,
                                    public clips::ContinuousLinePresentationProvider
 {
 public:
+  CanvasViewportBinding panelView;
+
+    std::shared_ptr<void> capturePanelState()const
+    {return std::make_shared<std::vector<MidiEnvelopePoint>>(points);}
+    void restorePanelState(const std::shared_ptr<void>& state)
+    {if(state)points=*std::static_pointer_cast<std::vector<MidiEnvelopePoint>>(state);}
+    std::vector<double> panelEventTimes()const
+    {std::vector<double> result;for(const auto& p:points)result.push_back(p.normX*32.0);return result;}
+
+
     explicit ContinuousLineCanvas (
         LabComponent& h,
         const timeline_visual_style::CurveLineColourVariant colourVariant
@@ -40,7 +50,7 @@ public:
                                                             ayra::MarqueeSelector::ModifierMode mode)
         {
             const auto b = clips::computeContinuousLineLayout (
-                getLocalBounds().toFloat(), true).graphBounds;
+                panelView.domainBounds(getLocalBounds().toFloat()), true).graphBounds;
             bool anyChanged = false;
 
             for (int pointIndex = 0;
@@ -139,8 +149,8 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        const auto pps = getWidth() / 32.0;
-        host.look().drawTrackGrid (g, getLocalBounds(), pps);
+        const auto pps = panelView.pixelsPerSecond(getWidth());
+        panelView.paintGrid(g,host.look(),getLocalBounds(),pps);
     }
 
     void paintOverChildren (juce::Graphics& g) override
@@ -178,9 +188,9 @@ private:
         if (lineComponent && getWidth() > 0 && getHeight() > 0)
         {
             lineComponent->setBodyBoundsInParent (
-                juce::Rectangle<float> (0.0f, 0.0f,
+                panelView.domainBounds(juce::Rectangle<float> (0.0f, 0.0f,
                                         static_cast<float> (getWidth()),
-                                        static_cast<float> (height)));
+                                        static_cast<float> (height))));
         }
     }
 
@@ -194,9 +204,9 @@ private:
         outSegIdx = -1;
 
         const auto b = clips::computeContinuousLineLayout (
-            juce::Rectangle<float> (0.0f, 0.0f,
+            panelView.domainBounds(juce::Rectangle<float> (0.0f, 0.0f,
                                     static_cast<float> (getWidth()),
-                                    static_cast<float> (height)),
+                                    static_cast<float> (height))),
             true).graphBounds;
         if (b.getWidth() <= 4.0f || b.getHeight() <= 8.0f)
             return;
@@ -335,8 +345,7 @@ private:
                 clips::ClipKind::continuousLine,
                 dragZone == TimelineClipZone::none
                     ? TimelineClipZone::laneBackground : dragZone,
-                e.position, clips::timelineSecondsFromCanvasX (
-                    e.position.x, getWidth()), e.mods);
+                e.position, panelView.xToTime(e.position.x,getWidth()), e.mods);
             context.pointIndex = draggedPointIdx;
             context.segmentIndex = draggedSegmentIdx;
             host.requestTimelineContextMenu(context);
@@ -348,7 +357,7 @@ private:
 
         if (dragZone == TimelineClipZone::none)
         {
-            if (e.position.y >= getHeight() - 6.0f)
+            if (!panelView.enabled && e.position.y >= getHeight() - 6.0f)
             {
                 isResizingLaneHeight = true;
                 resizeLaneStartY = e.getScreenY();
@@ -433,9 +442,9 @@ private:
             return;
 
         const auto graph = clips::computeContinuousLineLayout (
-            juce::Rectangle<float> (0.0f, 0.0f,
+            panelView.domainBounds(juce::Rectangle<float> (0.0f, 0.0f,
                                     static_cast<float> (getWidth()),
-                                     static_cast<float> (height)),
+                                     static_cast<float> (height))),
             true).graphBounds;
         const float w = graph.getWidth();
         const float h = graph.getHeight();
@@ -585,9 +594,9 @@ private:
 
         // Doppio click sulla linea o sullo sfondo: inserisce un nuovo punto
         const auto graph = clips::computeContinuousLineLayout (
-            juce::Rectangle<float> (0.0f, 0.0f,
+            panelView.domainBounds(juce::Rectangle<float> (0.0f, 0.0f,
                                     static_cast<float> (getWidth()),
-                                    static_cast<float> (height)),
+                                    static_cast<float> (height))),
             true).graphBounds;
         if (!graph.contains (e.position)) { return; }
         const float normX = juce::jlimit (0.01f, 0.99f,
@@ -604,6 +613,9 @@ private:
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
+        if(panelView.enabled && (e.mods.isCommandDown()||e.mods.isCtrlDown()||e.mods.isShiftDown()))
+        { Component::mouseWheelMove(e,wheel);return; }
+
         if (e.mods.isAltDown() || e.mods.isCommandDown() || e.mods.isCtrlDown() || e.mods.isShiftDown())
         {
             const float delta = (std::abs (wheel.deltaY) > 0.0001f ? wheel.deltaY : wheel.deltaX);

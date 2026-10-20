@@ -1,4 +1,5 @@
 #include "../demo/PanelFixture.h"
+#include "../demo/PanelClipWindow.h"
 #include <cstdlib>
 #include <iostream>
 using namespace ayra::lab;
@@ -32,6 +33,20 @@ void controls()
     CHECK(findTrack(store.state(),"guitar.audio")->colour==0xff112233);
     CHECK(findTrack(store.state(),"voice.midi")->colour==0xffe34b4b);
     CHECK(store.state().panelMetadata->owners[4].colour==ownerColour);
+    CHECK(c.adopt(host.snapshot()));CHECK(c.rename("voice.midi","MIDI solo label"));
+    CHECK(findTrack(store.state(),"voice.midi")->name=="MIDI solo label");
+    CHECK(findTrack(store.state(),"voice.audio")->name=="Audio");
+    CHECK(store.undo());CHECK(findTrack(store.state(),"voice.midi")->name=="MIDI");
+    CHECK(c.adopt(host.snapshot())); CHECK(c.renameOwner("voice","Voce principale"));
+    const auto renamed=host.snapshot();
+    const auto owned=std::find_if(renamed.owners.begin(),renamed.owners.end(),[](const auto& o){return o.id=="voice";});
+    CHECK(owned!=renamed.owners.end()); CHECK(owned->name=="Voce principale");
+    CHECK(findTrack(store.state(),"voice.audio")->name=="Audio");
+    CHECK(findTrack(store.state(),"voice.midi")->name=="MIDI");
+    CHECK(!c.renameOwner("voice","Stale request"));
+    CHECK(store.undo()); CHECK(c.adopt(host.snapshot()));
+    CHECK(c.owner("voice")->name=="Voice");
+    CHECK(!c.renameOwner("voice","\n")); CHECK(!c.renameOwner("missing","New name"));
     auto bad=store.state();bad.panelMetadata.reset();CHECK(!store.commit(bad,"Bad import"));
     CHECK(store.state().panelMetadata);
 }
@@ -99,5 +114,19 @@ void failuresAndLifetime()
     CHECK(!store.prepareCommit); const int previous=calls;
     store.selectClip("voice.audio.one");CHECK(calls==previous+1);
 }
+void visibleClipProjection()
+{
+    Track source;source.id="dense";
+    for(int i=0;i<10000;++i)source.clips.push_back({std::to_string(i),"",i*10.0,2,1,1});
+    PanelClipWindow window;window.update(source,1);
+    ayra::timeline::TimelineTimeWindow t{0,10,0};
+    auto visible=window.visible(t,100,false);CHECK(visible.size()==2);
+    const auto projected=window.projection(visible,80);CHECK(projected.clips.size()==2);CHECK(projected.height==80);
+    CHECK(projected.clips[0].id=="0"&&projected.clips[1].id=="1");CHECK(source.clips.size()==10000);
+    t.startSeconds=50000;visible=window.visible(t,100,false);CHECK(!visible.contains("0"));CHECK(visible.contains("5000"));
+    CHECK(window.canonicalIds->contains("0")); // invisible is not deletion
+    CHECK(window.visible(t,100,true).size()==10000); // captured gesture retains its scope
+    source.clips.erase(source.clips.begin());window.update(source,2);CHECK(!window.canonicalIds->contains("0"));
 }
-int main(){controls();relations();failuresAndLifetime();std::cout<<"PASS "<<count<<" fixture/transaction checks\n";}
+}
+int main(){visibleClipProjection();controls();relations();failuresAndLifetime();std::cout<<"PASS "<<count<<" fixture/transaction checks\n";}

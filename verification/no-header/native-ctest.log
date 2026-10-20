@@ -1,0 +1,20 @@
+Internal ctest changing into directory: /mnt/data/implementation/native-clang
+Test project /mnt/data/implementation/native-clang
+    Start 1: core_regressions
+1/7 Test #1: core_regressions .................   Passed    0.01 sec
+    Start 2: timeline_panel_contracts
+2/7 Test #2: timeline_panel_contracts .........   Passed    0.10 sec
+    Start 3: timeline_fixture_transactions
+3/7 Test #3: timeline_fixture_transactions ....   Passed    0.06 sec
+    Start 4: fixture_sources
+4/7 Test #4: fixture_sources ..................   Passed    0.72 sec
+    Start 5: codec_regressions
+5/7 Test #5: codec_regressions ................   Passed    0.03 sec
+    Start 6: clip_component_regressions
+6/7 Test #6: clip_component_regressions .......   Passed    0.19 sec
+    Start 7: native_panel_interactions
+7/7 Test #7: native_panel_interactions ........   Passed    3.56 sec
+
+100% tests passed, 0 tests failed out of 7
+
+Total Test time (real) =   4.67 sec

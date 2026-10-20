@@ -1,0 +1,15 @@
+Building /mnt/data/implementation/Lab (Debug)
+-- Checking for modules 'webkit2gtk-4.0;gtk+-x11-3.0'
+--   Package 'webkit2gtk-4.0', required by 'virtual:world', not found
+--   Package 'gtk+-x11-3.0', required by 'virtual:world', not found
+-- Configuring juceaide
+-- Building juceaide
+-- Exporting juceaide
+-- Testing juceaide
+-- Finished setting up juceaide
+-- Configuring done (5.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/implementation/native-clang
+[ 13%] Built target ayra_lab_core
+[100%] Built target AyraTimelineLab
+JUCE v8.0.12

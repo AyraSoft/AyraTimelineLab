@@ -61,21 +61,41 @@
           "id": "backing-quad",
           "name": "Neon — stems",
           "start": 1,
-          "length": 12,
+          "length": 13,
           "channels": 4,
           "seed": 3,
           "fadeIn": 1.4,
           "fadeOut": 2.1
         },
         {
+          "id": "backing-sub",
+          "name": "Sub-Layer · [Contained Overlap]",
+          "start": 4,
+          "length": 6,
+          "channels": 2,
+          "seed": 15,
+          "fadeIn": 0.8,
+          "fadeOut": 0.8
+        },
+        {
           "id": "backing-stereo",
-          "name": "Neon — stereo",
-          "start": 15,
-          "length": 12,
+          "name": "Neon Outro · [Transition · Dissolve]",
+          "start": 12,
+          "length": 10,
           "channels": 2,
           "seed": 7,
           "fadeIn": 0.8,
           "fadeOut": 1.6
+        },
+        {
+          "id": "backing-audition",
+          "name": "Audition Stem · [Audition] [Limits]",
+          "start": 23,
+          "length": 8,
+          "channels": 2,
+          "seed": 27,
+          "fadeIn": 0.5,
+          "fadeOut": 1.0
         }
       ]
     },
@@ -113,9 +133,9 @@
       "clips": [
         {
           "id": "voice-take",
-          "name": "Voce — stereo / L 1 · R 4",
-          "start": 3,
-          "length": 15,
+          "name": "Voce Lead · Stereo Take",
+          "start": 2,
+          "length": 10,
           "channels": 2,
           "seed": 12,
           "fadeIn": 1.2,
@@ -123,13 +143,33 @@
         },
         {
           "id": "voice-quad",
-          "name": "Voci — quad",
-          "start": 21,
-          "length": 9,
+          "name": "Voci Harmony · [Rev] [Ø]",
+          "start": 13,
+          "length": 8,
           "channels": 4,
           "seed": 16,
           "fadeIn": 0.5,
           "fadeOut": 1.2
+        },
+        {
+          "id": "voice-muted",
+          "name": "Ad-lib Take · [Muted]",
+          "start": 22,
+          "length": 4,
+          "channels": 2,
+          "seed": 18,
+          "fadeIn": 0.5,
+          "fadeOut": 0.5
+        },
+        {
+          "id": "voice-locked",
+          "name": "Final Comp · [Locked]",
+          "start": 27,
+          "length": 4,
+          "channels": 2,
+          "seed": 20,
+          "fadeIn": 0.5,
+          "fadeOut": 0.5
         }
       ]
     },
@@ -169,19 +209,39 @@
           "id": "synth-riff",
           "name": "Synth — Arpeggio 16th",
           "start": 2,
-          "length": 14,
+          "length": 11,
           "channels": 2,
           "seed": 5,
           "fadeIn": 0,
           "fadeOut": 0
         },
         {
+          "id": "synth-sub",
+          "name": "Synth Arp Fill · [Contained MIDI]",
+          "start": 5,
+          "length": 5,
+          "channels": 2,
+          "seed": 11,
+          "fadeIn": 0,
+          "fadeOut": 0
+        },
+        {
           "id": "synth-lead",
-          "name": "Synth — Solo Hook",
-          "start": 18,
-          "length": 10,
+          "name": "Synth Solo Hook · [Rev] [Limits]",
+          "start": 14,
+          "length": 8,
           "channels": 2,
           "seed": 9,
+          "fadeIn": 0,
+          "fadeOut": 0
+        },
+        {
+          "id": "synth-locked",
+          "name": "Synth Pattern B · [Locked]",
+          "start": 23,
+          "length": 8,
+          "channels": 2,
+          "seed": 13,
           "fadeIn": 0,
           "fadeOut": 0
         }
@@ -230,12 +290,32 @@
           "fadeOut": 0
         },
         {
+          "id": "filter-sub",
+          "name": "Filter Dip · [Contained Line]",
+          "start": 5,
+          "length": 6,
+          "channels": 1,
+          "seed": 22,
+          "fadeIn": 0,
+          "fadeOut": 0
+        },
+        {
           "id": "pitch-bend",
-          "name": "Lead Pitch Bend",
-          "start": 18,
-          "length": 10,
+          "name": "Lead Pitch Bend · [Transition · Dissolve]",
+          "start": 15,
+          "length": 8,
           "channels": 1,
           "seed": 18,
+          "fadeIn": 0,
+          "fadeOut": 0
+        },
+        {
+          "id": "filter-muted",
+          "name": "LFO Modulation · [Muted] [Ø]",
+          "start": 24,
+          "length": 7,
+          "channels": 1,
+          "seed": 26,
           "fadeIn": 0,
           "fadeOut": 0
         }
@@ -416,13 +496,33 @@
           "fadeOut": 1.0
         },
         {
-          "id": "filmstrip-scene2",
-          "name": "Visual Sequence · Climax",
-          "start": 17,
-          "length": 12,
+          "id": "filmstrip-pip",
+          "name": "Visual PiP · [Contained Video]",
+          "start": 4,
+          "length": 6,
+          "channels": 1,
+          "seed": 33,
+          "fadeIn": 0.5,
+          "fadeOut": 0.5
+        },
+        {
+          "id": "filmstrip-hold",
+          "name": "Visual Climax · [Hold]",
+          "start": 16,
+          "length": 6,
           "channels": 1,
           "seed": 25,
           "fadeIn": 0.5,
+          "fadeOut": 1.0
+        },
+        {
+          "id": "filmstrip-trans",
+          "name": "Visual Outro · [Transition · Dissolve] [Limits]",
+          "start": 20,
+          "length": 11,
+          "channels": 1,
+          "seed": 37,
+          "fadeIn": 1.0,
           "fadeOut": 1.5
         }
       ]

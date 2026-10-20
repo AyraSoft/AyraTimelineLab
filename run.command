@@ -1,72 +1,58 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# -----------------------------------------------------------------------------
-# Ayra Timeline Lab — Build & Run Script
-# Trascina questo file nel Terminale e premi Invio (oppure fai doppio clic nel Finder)
-# -----------------------------------------------------------------------------
-
-# Risolvi la directory del progetto indipendentemente da dove viene invocato
+# Local build/launcher. No personal paths, dependency downloads or signing changes.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-if [ -f "$SCRIPT_DIR/CMakeLists.txt" ]; then
+if [[ -f "$SCRIPT_DIR/CMakeLists.txt" ]]; then
     PROJECT_ROOT="$SCRIPT_DIR"
-elif [ -f "$SCRIPT_DIR/../CMakeLists.txt" ]; then
+elif [[ -f "$SCRIPT_DIR/../CMakeLists.txt" ]]; then
     PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 else
-    echo "❌ Errore: Impossibile trovare la radice del progetto AyraTimelineLab." >&2
+    printf '%s\n' 'Cannot locate AyraTimelineLab/CMakeLists.txt.' >&2
     exit 1
 fi
-
-cd "$PROJECT_ROOT"
-
-# Assicurati che cmake, ninja e i tool Homebrew siano nel PATH
 export PATH="/usr/local/opt/cmake/bin:/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/opt/cmake/bin:/Applications/CMake.app/Contents/bin:$PATH"
+command -v cmake >/dev/null || { printf '%s\n' 'CMake 3.22 or newer is required.' >&2; exit 1; }
+BUILD_DIR="${AYRA_LAB_BUILD_DIR:-$PROJECT_ROOT/build/native}"
+CONFIGURATION="${AYRA_LAB_CONFIGURATION:-Debug}"
+cd "$PROJECT_ROOT"
+NCPU="${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}"
 
-if ! command -v cmake &>/dev/null; then
-    echo "❌ Errore: 'cmake' non trovato nel PATH. Installa CMake o verifica l'installazione." >&2
+# Existing CMake paths can be reused; environment values take precedence.
+cache_path() {
+    if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
+        sed -n "s|^$1:PATH=||p" "$BUILD_DIR/CMakeCache.txt" | head -n 1
+    fi
+}
+JUCE_DIR="${JUCE_SOURCE_DIR:-$(cache_path JUCE_SOURCE_DIR)}"
+MODULES_DIR="${AYRA_MODULES_DIR:-$(cache_path AYRA_MODULES_DIR)}"
+VISUAL_SOURCE_DIR="${AYRA_SOURCE_DIR:-$(cache_path AYRA_SOURCE_DIR)}"
+if [[ ! -f "$JUCE_DIR/CMakeLists.txt" ]]; then
+    printf '%s\n' 'Set JUCE_SOURCE_DIR to an existing official JUCE 8 checkout.' >&2
     exit 1
 fi
-
-# Directory di build e configurazione
-BUILD_DIR="$PROJECT_ROOT/build"
-NCPU=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
-
-JUCE_DIR="/Users/ayra/ayra-dsp-audit.wbZu5T/JUCE"
-MODULES_DIR="/Users/Lavori/Juce/Juce Modules"
-
-echo "=========================================================="
-echo "🚀 Avvio compilazione Ayra Timeline Lab..."
-echo "📂 Progetto: $PROJECT_ROOT"
-echo "⚙️  Core CPU: $NCPU"
-echo "=========================================================="
-
-# Se la directory di build non è ancora configurata per la GUI, configurala
-if [ ! -f "$BUILD_DIR/CMakeCache.txt" ]; then
-    echo "🔧 Configurazione CMake iniziale..."
-    cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" \
-        -DCMAKE_BUILD_TYPE=Debug \
-        -DAYRA_LAB_BUILD_GUI=ON \
-        -DJUCE_SOURCE_DIR="$JUCE_DIR" \
-        -DAYRA_MODULES_DIR="$MODULES_DIR"
-fi
-
-# Compila l'eseguibile dell'applicazione
-echo "🔨 Compilazione target 'AyraTimelineLab'..."
-cmake --build "$BUILD_DIR" --target AyraTimelineLab -j"$NCPU"
-
-APP_BUNDLE="$BUILD_DIR/AyraTimelineLab_artefacts/Ayra Timeline Lab.app"
-APP_BIN="$APP_BUNDLE/Contents/MacOS/Ayra Timeline Lab"
-
-if [ ! -x "$APP_BIN" ]; then
-    echo "❌ Errore: Il binario '$APP_BIN' non esiste o non è eseguibile." >&2
+if [[ ! -f "$MODULES_DIR/ayra_curves/ayra_curves.h" || ! -f "$MODULES_DIR/ayra_timeline/ayra_timeline_presentation.h" ]]; then
+    printf '%s\n' 'Set AYRA_MODULES_DIR to the directory containing ayra_curves and ayra_timeline (caa00902 or newer).' >&2
     exit 1
 fi
+if [[ ! -f "$PROJECT_ROOT/ayra_ui/melatonin_blur/melatonin_blur.h" ]]; then
+    printf '%s\n' 'The pinned melatonin_blur submodule is missing; initialize the repository submodules.' >&2
+    exit 1
+fi
+printf 'Building %s (%s)\n' "$PROJECT_ROOT" "$CONFIGURATION"
+cmake -S "$PROJECT_ROOT" -B "$BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE="$CONFIGURATION" -DAYRA_LAB_BUILD_GUI=ON \
+    -DJUCE_SOURCE_DIR="$JUCE_DIR" -DAYRA_MODULES_DIR="$MODULES_DIR" \
+    -DAYRA_SOURCE_DIR="$VISUAL_SOURCE_DIR" \
+    -DAYRA_LAB_REQUIRE_MULTIVERSE_VISUALS="${AYRA_LAB_REQUIRE_MULTIVERSE_VISUALS:-ON}"
+cmake --build "$BUILD_DIR" --target AyraTimelineLab --config "$CONFIGURATION" --parallel "$NCPU"
 
-echo "=========================================================="
-echo "✅ Compilazione completata con successo!"
-echo "🚀 Lancio di Ayra Timeline Lab in corso..."
-echo "=========================================================="
-
-# Avvia l'app passando eventuali argomenti passati allo script (es. --legacy o --session)
-exec "$APP_BIN" "$@"
+# JUCE generators may use a configuration subdirectory. Support macOS and Linux.
+for ARTIFACTS in "$BUILD_DIR/AyraTimelineLab_artefacts/$CONFIGURATION" "$BUILD_DIR/AyraTimelineLab_artefacts"; do
+    for BIN in "$ARTIFACTS/Ayra Timeline Lab.app/Contents/MacOS/Ayra Timeline Lab" \
+               "$ARTIFACTS/Ayra Timeline Lab" "$ARTIFACTS/AyraTimelineLab"; do
+        if [[ -x "$BIN" ]]; then exec "$BIN" "$@"; fi
+    done
+done
+printf 'Build succeeded but the application was not found under %s/AyraTimelineLab_artefacts.\n' "$BUILD_DIR" >&2
+exit 1

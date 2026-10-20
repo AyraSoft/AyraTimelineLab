@@ -1,0 +1,5 @@
+Core: PASS: 208 core assertions
+Presentation: PASS 939 checks (presentation only; no native GUI claim)
+Fixture: PASS 106 fixture/transaction checks
+JUCE v8.0.12
+PASS 349 native component assertions; 10000 logical lanes; maximum resident rows 15

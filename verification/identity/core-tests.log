@@ -1,0 +1,67 @@
+Start testing: Oct 20 03:13 UTC
+----------------------------------------------------------
+1/4 Testing: core_regressions
+1/4 Test: core_regressions
+Command: "/mnt/data/build-core/ayra_lab_tests"
+Directory: /mnt/data/build-core
+"core_regressions" start time: Oct 20 03:13 UTC
+Output:
+----------------------------------------------------------
+PASS: 208 core assertions
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"core_regressions" end time: Oct 20 03:13 UTC
+"core_regressions" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/4 Testing: timeline_panel_contracts
+2/4 Test: timeline_panel_contracts
+Command: "/mnt/data/build-core/ayra_timeline_panel_tests"
+Directory: /mnt/data/build-core
+"timeline_panel_contracts" start time: Oct 20 03:13 UTC
+Output:
+----------------------------------------------------------
+PASS 939 checks (presentation only; no native GUI claim)
+<end of output>
+Test time =   0.09 sec
+----------------------------------------------------------
+Test Passed.
+"timeline_panel_contracts" end time: Oct 20 03:13 UTC
+"timeline_panel_contracts" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/4 Testing: timeline_fixture_transactions
+3/4 Test: timeline_fixture_transactions
+Command: "/mnt/data/build-core/ayra_panel_fixture_tests"
+Directory: /mnt/data/build-core
+"timeline_fixture_transactions" start time: Oct 20 03:13 UTC
+Output:
+----------------------------------------------------------
+PASS 118 fixture/transaction checks
+<end of output>
+Test time =   0.07 sec
+----------------------------------------------------------
+Test Passed.
+"timeline_fixture_transactions" end time: Oct 20 03:13 UTC
+"timeline_fixture_transactions" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/4 Testing: fixture_sources
+4/4 Test: fixture_sources
+Command: "/opt/pyvenv/bin/python3" "/mnt/data/project/tools/generate.py" "--check"
+Directory: /mnt/data/build-core
+"fixture_sources" start time: Oct 20 03:13 UTC
+Output:
+----------------------------------------------------------
+Generated sources: OK
+<end of output>
+Test time =   0.79 sec
+----------------------------------------------------------
+Test Passed.
+"fixture_sources" end time: Oct 20 03:13 UTC
+"fixture_sources" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Oct 20 03:13 UTC

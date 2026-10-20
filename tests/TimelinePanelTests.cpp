@@ -169,9 +169,35 @@ void largeHierarchy()
     Controller c; CHECK(c.adopt(s)); CHECK(c.rows().size()==10000);
     CHECK(c.rows().back().depth==9999); CHECK(c.visible(c.totalHeight()-10,10).second==10000);
 }
+void noHeaderPolicies()
+{
+    auto s=fixture();s.lanes.back().heightPolicy=HeightPolicy::compact;
+    s.lanes.back().minimumHeight=16;s.lanes.back().initialHeight=24;
+    Controller c;CHECK(c.adopt(s));CHECK(c.setMode(Mode::freeLanes));
+    double sum=0;for(const auto& lane:s.lanes)sum+=lane.initialHeight;
+    CHECK(c.totalHeight()==sum);CHECK(Controller::seamHeight==0);
+    CHECK(c.height("tempo")==24);CHECK(!c.beginResize("tempo"));CHECK(!c.setHeight("tempo",200));
+    const auto oldHeight=c.height("a.audio");CHECK(c.beginResize("a.audio"));
+    CHECK(c.updateResize(31));CHECK(c.height("a.audio")==oldHeight+31);c.endResize(false);
+    CHECK(c.height("a.audio")==oldHeight);CHECK(c.totalHeight()==sum);
+    CHECK(c.setLaneVisible("a.audio",false));CHECK(c.totalHeight()==sum-oldHeight);
+    std::vector<Id> visited;c.visitRows(0,10000,0,[&](const Row& r){visited.push_back(r.lane);});
+    CHECK(std::find(visited.begin(),visited.end(),"a.audio")==visited.end());
+    CHECK(c.setLaneVisible("a.audio",true));CHECK(c.totalHeight()==sum);
+    CHECK(!c.setLaneVisible("tempo",false));
+    auto chrome=c.view().chrome;chrome.navigation=false;chrome.inputMeters=true;
+    CHECK(c.setChrome(chrome));CHECK(c.view().chrome==chrome);CHECK(c.totalHeight()==sum);
+    Command captured;c.onCommand=[&](const Command& command){captured=command;return Result{};};
+    CHECK(c.rename("a.audio","New name"));CHECK(captured.kind==CommandKind::renameLane);
+    CHECK(captured.owner=="a"&&captured.lane=="a.audio"&&captured.label=="New name");
+    CHECK(!c.rename("missing","bad"));
+    s.lanes[0].heightPolicy=HeightPolicy::automatic;CHECK(c.adopt(s));
+    CHECK(c.setAutoHeight("a.audio",81));CHECK(c.height("a.audio")==81);CHECK(!c.beginResize("a.audio"));
+}
 }
 int main()
 {
+    noHeaderPolicies();
     validation(); layout(); resizeAndViewport(); commands(); largeHierarchy();
     std::cout << "PASS " << checks << " checks (presentation only; no native GUI claim)\n";
 }

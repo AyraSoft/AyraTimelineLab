@@ -50,6 +50,10 @@ void LabLookAndFeel::setDark(bool d)
     palette=readCanonicalPalette(d);
     setColour(juce::ResizableWindow::backgroundColourId,palette.base);
     setColour(juce::Label::textColourId,palette.text);
+    setColour(juce::TextButton::buttonColourId,palette.raised);
+    setColour(juce::TextButton::buttonOnColourId,palette.accent);
+    setColour(juce::TextButton::textColourOffId,palette.text);
+    setColour(juce::TextButton::textColourOnId,ayra::tokens::textOnTint(palette.accent));
     setColour(juce::TextEditor::backgroundColourId,palette.recessed);
     setColour(juce::TextEditor::textColourId,palette.text);
     setColour(juce::TextEditor::outlineColourId,palette.border);
@@ -68,7 +72,11 @@ void LabLookAndFeel::setDark(bool d)
 }
 const char* LabLookAndFeel::sourceLabel()const noexcept
 {
-    return "Ayra Canonical Design System (Frosted Lab / Dark Cosmic)";
+#if defined(AYRA_LAB_VISUALS_FROM_MULTIVERSE) && AYRA_LAB_VISUALS_FROM_MULTIVERSE
+    return "Multiverse: sorgenti visuali diretti / adattatore Lab";
+#else
+    return "ayra_ui: snapshot locale / non Multiverse live";
+#endif
 }
 void LabLookAndFeel::raised(juce::Graphics& g,juce::Rectangle<float> r,float corner,juce::Colour base)const
 {
@@ -99,12 +107,13 @@ void LabLookAndFeel::drawHeader(juce::Graphics& g,juce::Rectangle<int> r,const T
     g.setColour(palette.secondary.withAlpha(.45f));
     g.fillRect(r.getCentreX()-13,r.getBottom()-4,26,1);
 }
-void LabLookAndFeel::drawTrackGrid(juce::Graphics& g,juce::Rectangle<int> r,double pps)const
+void LabLookAndFeel::drawTrackGrid(juce::Graphics& g,juce::Rectangle<int> r,double pps,double originX)const
 {
     g.fillAll(palette.recessed);g.setColour(palette.border.withAlpha(.3f));
     const auto step=static_cast<int>(std::max(20.0,pps*2));
-    for(int x=0;x<r.getWidth();x+=step)g.drawVerticalLine(x,0,static_cast<float>(r.getHeight()));
+    for(int x=static_cast<int>(std::fmod(originX,static_cast<double>(step)))-step;x<r.getWidth();x+=step)g.drawVerticalLine(x,0,static_cast<float>(r.getHeight()));
 }
+#if !AYRA_LAB_VISUALS_FROM_MULTIVERSE
 void LabLookAndFeel::drawButtonBackground(juce::Graphics& g,juce::Button& button,const juce::Colour&,bool over,bool down)
 {
     auto base=button.getToggleState()?palette.accent.withAlpha(.25f).overlaidWith(palette.base.withAlpha(.5f)):palette.raised;
@@ -124,4 +133,5 @@ void LabLookAndFeel::drawButtonText(juce::Graphics& g,juce::TextButton& button,b
     g.setColour(ink.withMultipliedAlpha(button.isEnabled()?1.0f:.35f));g.setFont(font(10,true));
     g.drawText(button.getButtonText(),button.getLocalBounds().reduced(3,0),juce::Justification::centred);
 }
+#endif
 }

@@ -1,0 +1,127 @@
+{
+  "repository": "AyraSoft/ayra_multiverse",
+  "revision": "459d8c5cfc4e06bd849db12799e447ec90be3feb",
+  "scope": "verified source slice; not a full product checkout",
+  "files": {
+    "modules/look_and_feel/ayra_NodeButtons.h": {
+      "git_blob": "e7ce36fc2bd18f0bec7cf8a214dbedaba84d5df8",
+      "sha256": "14d06d4aed0834b22695b8eb9e09aca23145e0ea3c54decda9620f2b63d47568"
+    },
+    "modules/look_and_feel/ayra_CommonDefaultLookAndFeel_Mixer.cpp": {
+      "git_blob": "9766904d5ce3c683ffa2475c6a1c405af411552a",
+      "sha256": "9a33731353315641ff8f60308fe90dc1845167de46ddcbf34cf6efb49241fa04"
+    },
+    "modules/look_and_feel/ayra_ChromePrimitives.h": {
+      "git_blob": "078034cf3f7ac118e431b745afd3e5a1e64c63ab",
+      "sha256": "41060ac3d3785fa1875c3be94fd29be42f0822f17a50f8fe8643d34a12b78b9f"
+    },
+    "modules/widgets/controls/tab_strip/ayra_TabStrip.h": {
+      "git_blob": "b61614c7244ef0ef59e5f2119099f3e5bfac65b6",
+      "sha256": "41e036bbc15ba1c84605354ca8b45ca14ccbd4f50363771592b1c1f070c2a679"
+    },
+    "modules/widgets/controls/tab_strip/ayra_TabStrip.cpp": {
+      "git_blob": "4947292605fcf8d68348d76567458a2ef4b0caa1",
+      "sha256": "5d3fc098fb9b22711da5e1898fcba21c3919253d61eac70312359cb09e3fb6a6"
+    },
+    "modules/widgets/controls/add_button/ayra_AddButton.cpp": {
+      "git_blob": "a1b8e459d2a3a63777a5ec91f14ba56f4b97dfd6",
+      "sha256": "627e42cc681afbe59da3e43050f999a255d98c2dd6943703773de388c38062f4"
+    },
+    "modules/widgets/controls/add_button/ayra_AddButton.h": {
+      "git_blob": "f8b076d6f3556f53a11e6f17042932b92f526106",
+      "sha256": "3f02f726205e00536e909749bdd379ce833db94bd16eec3d1b3db59dc2b593c2"
+    },
+    "modules/widgets/controls/shape_icon_button/ayra_ShapeIconButton.cpp": {
+      "git_blob": "6da790c8cab45dbbabf8f33a5f9f1dae5db9636a",
+      "sha256": "10300f36b4c17437be04db72e9f6f0ae8fb78b6bcf2149a746a64d01af79ab0c"
+    },
+    "modules/widgets/controls/shape_icon_button/ayra_ShapeIconButton.h": {
+      "git_blob": "84ea6d61e9288ae533353753b0cf57af3898dff7",
+      "sha256": "ac159302d2817799c7878372b9b70922c99be56c873c07431a2c95d270dc8e64"
+    },
+    "modules/widgets/controls/drag_value_field/ayra_DragValueField.cpp": {
+      "git_blob": "87df8b16683982956e69245f41914d4b905f8a0f",
+      "sha256": "7f7805162db7e4bd1180e7fe25983f707cb7738a873aff32639454394ffcfbde"
+    },
+    "modules/widgets/controls/drag_value_field/ayra_DragValueField.h": {
+      "git_blob": "9d575eaf0dc7356651959304b398f6758df5afdd",
+      "sha256": "467d7b98de84ca58e5c685ba0fcc231f915d1bfa1ce55ee4c0d4f7959b7bf089"
+    },
+    "modules/look_and_feel/app/ApplicationLookAndFeel_Buttons.cpp": {
+      "git_blob": "57a52c29f41dd463d758a2fd6ded62aeec8affc2",
+      "sha256": "3a48b8eedae7fe3e57d63629c629262a12f07896e1f58fb0bc51939d63d67e15"
+    },
+    "modules/look_and_feel/glyphs/ayra_Glyphs.h": {
+      "git_blob": "fde8c7bf92cd9d179d9a90ad20dd3dfb5fcb6013",
+      "sha256": "bfbcc495bb74aee5411abb4244ec54fa6f893c581e69c5a127cf727fb1c17fe3"
+    },
+    "modules/look_and_feel/glyphs/ayra_Glyph.h": {
+      "git_blob": "412fd0fe092fadb45c2f8dd9b7d0bb4141c3457b",
+      "sha256": "85dca1040b0f411ab750f5fb3ffcd5b50af8fccabcfc921c8a2cd031e54debe2"
+    },
+    "modules/look_and_feel/glyphs/ayra_ActionGlyphs.h": {
+      "git_blob": "cae032b857f5a3600b203c87ef016a397c1813da",
+      "sha256": "5fabcc3e29678a938952fe83f7b9e09807ab60c4235131d44e6332705ea6d9dd"
+    },
+    "modules/look_and_feel/glyphs/ayra_StateGlyphs.h": {
+      "git_blob": "d0528aaaffce1d4e7185a1433eb6dc38ec51e4ef",
+      "sha256": "716243caa5cc1a59f2e75dcab64ac6fbe780b49a7825fd9b71ccdf38c251f39b"
+    },
+    "modules/look_and_feel/glyphs/ayra_CommandGlyphs.h": {
+      "git_blob": "130e6b6b1acd60f46a3590ff47309ce99a75147c",
+      "sha256": "7edb0e12144b9fc18e6f7f98cc82fe751e3a8a01ddc6841e395ff2d321316f48"
+    },
+    "modules/look_and_feel/glyphs/ayra_DeviceGlyphs.h": {
+      "git_blob": "04e8ed3d7b89cca75a64eb9b54287a72aa5aa798",
+      "sha256": "9283d38bb76faad26be48b786c91f95a649e252578d0d2358d195fe93cc6039e"
+    },
+    "modules/look_and_feel/glyphs/ayra_LayoutGlyphs.h": {
+      "git_blob": "c195c9832ee611939dddb11c57129410bb65d4fd",
+      "sha256": "bd71f7f25afc28eab619638433b400193155b7ed6bafe97a51784c9a4021d167"
+    },
+    "modules/look_and_feel/glyphs/ayra_SystemGlyphs.h": {
+      "git_blob": "cea156f428972b2925538473a7c3a8d443254a45",
+      "sha256": "a21ed987888fbb6b04adfb408c338a978ff445e7e2c249ae55866e5ff2c5645b"
+    },
+    "modules/look_and_feel/glyphs/ayra_LogoGlyphs.h": {
+      "git_blob": "a06a57f0932683382c56847a3657710d9c5000cf",
+      "sha256": "106f50b1f6c57174a027d72890271657e8ca7bd2e62cc92af15560526f9ee194"
+    },
+    "modules/look_and_feel/glyphs/ayra_GlyphHandles.h": {
+      "git_blob": "520563302b37f93caf8a7dd1e9ab064ba34a362a",
+      "sha256": "efc22cc094ac6c3f49cca9c179c243ceb34fac1b750312504abaff307fc78e17"
+    },
+    "modules/look_and_feel/glyphs/ayra_TransportGlyphs.h": {
+      "git_blob": "d0974b3344bfad0a45e4ca4a32c54df59a0c8ddf",
+      "sha256": "9e9b1a51acb74177d6196091d2bfbb1d81ba60f28f560160305c001af7e74ce6"
+    },
+    "modules/look_and_feel/glyphs/ayra_ControlGlyphs.h": {
+      "git_blob": "c3418ec6ba686c02932e3e5eb161d11db6538e09",
+      "sha256": "94ce43b13c32e80c01e03a7dce5fb7887589106beee43620138fe96f3276b727"
+    },
+    "modules/look_and_feel/glyphs/ayra_SnapshotGlyphs.h": {
+      "git_blob": "91bc503b2325b9bd9987d263ccb21cd969bec7ba",
+      "sha256": "94745f759845d9346d5b0183070709c5573026294ffc0b9c71517a8fa1bfac27"
+    },
+    "modules/look_and_feel/glyphs/ayra_FileGlyphs.h": {
+      "git_blob": "704f45aaef14eea48017c4738702868237563d31",
+      "sha256": "e295146939687dcc4748b4ebf403c2dee610692f00b7be9b9f533e0588ab36e1"
+    },
+    "modules/look_and_feel/tokens/ayra_Tokens_Typography.h": {
+      "git_blob": "77d4127bd37acfd11cb1d5c521e62b68796af47a",
+      "sha256": "24e71b9fec59402dd726f152783563e666fbb7b0ab48b93e86305d6ff598ba51"
+    },
+    "modules/look_and_feel/tokens/ayra_Tokens.h": {
+      "git_blob": "63dd66ec58cb086675ee876a316582532cc73299",
+      "sha256": "7170954105c508916c057ac90823955e7cee43c14bcab53e7be354dd1a49eced"
+    },
+    "modules/look_and_feel/tokens/ayra_Tokens_Colours.h": {
+      "git_blob": "9423e27a923c43da28ec8bf4ab62a0dc5e99aa8a",
+      "sha256": "aa1fc6ae7436aca7399bf01f0ced1108dde314934ee0df04f6b9ad45e21e317c"
+    },
+    "modules/look_and_feel/tokens/ayra_Tokens_Geometry.h": {
+      "git_blob": "35faa9cbfaba67c8148f76f41686d217b2c311de",
+      "sha256": "3c3516ae3be9ae36f08e747d0048afff595be742df49f9e0ac1a9fdbeaaa9cd1"
+    }
+  }
+}

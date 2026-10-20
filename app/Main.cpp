@@ -17,7 +17,15 @@ public:
         if(loadSession && window->legacyLab!=nullptr)
             window->legacyLab->loadFile(juce::File(commandLine.fromFirstOccurrenceOf("--session ",false,false).trim().unquoted()));
     }
-    void shutdown()override{window.reset();}
+    void shutdown() override
+    {
+        window.reset();
+        // All peers and their painters are gone. Release the shared Ayra shadow
+        // bitmaps before JUCE's static pixel-data leak detector is destroyed.
+        // Do not clear this cache during ordinary painting or row eviction.
+        ayra::shadowCache().clear();
+        juce::ImageCache::releaseUnusedImages();
+    }
     void systemRequestedQuit()override{quit();}
 private:
     class Window final : public juce::DocumentWindow

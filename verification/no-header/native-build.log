@@ -1,0 +1,10 @@
+[  5%] Built target ayra_lab_core
+[ 30%] Built target ayra_lab_clip_tests
+[ 47%] Built target ayra_panel_native_tests
+[ 50%] Built target ayra_lab_tests
+[ 54%] Built target ayra_timeline_panel_tests
+[ 57%] Built target ayra_panel_fixture_tests
+[ 59%] Building CXX object CMakeFiles/AyraTimelineLab.dir/app/Main.cpp.o
+[ 67%] Built target ayra_lab_codec_tests
+[ 69%] Linking CXX executable "AyraTimelineLab_artefacts/Debug/Ayra Timeline Lab"
+[100%] Built target AyraTimelineLab

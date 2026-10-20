@@ -1,0 +1,84 @@
+-- The C compiler identification is GNU 14.2.0
+-- The CXX compiler identification is GNU 14.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (6.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/implementation/release-core
+[ 22%] Building CXX object CMakeFiles/ayra_lab_core.dir/generated/FixtureData.cpp.o
+[ 22%] Building CXX object CMakeFiles/ayra_lab_core.dir/core/LabModel.cpp.o
+[ 33%] Linking CXX static library libayra_lab_core.a
+[ 33%] Built target ayra_lab_core
+[ 55%] Building CXX object CMakeFiles/ayra_timeline_panel_tests.dir/tests/TimelinePanelTests.cpp.o
+[ 55%] Building CXX object CMakeFiles/ayra_lab_tests.dir/tests/CoreTests.cpp.o
+[ 66%] Linking CXX executable ayra_lab_tests
+[ 66%] Built target ayra_lab_tests
+[ 77%] Building CXX object CMakeFiles/ayra_panel_fixture_tests.dir/tests/PanelFixtureTests.cpp.o
+[ 88%] Linking CXX executable ayra_timeline_panel_tests
+[ 88%] Built target ayra_timeline_panel_tests
+[100%] Linking CXX executable ayra_panel_fixture_tests
+[100%] Built target ayra_panel_fixture_tests
+Internal ctest changing into directory: /mnt/data/implementation/release-core
+Test project /mnt/data/implementation/release-core
+    Start 1: core_regressions
+1/4 Test #1: core_regressions .................   Passed    0.00 sec
+    Start 2: timeline_panel_contracts
+2/4 Test #2: timeline_panel_contracts .........   Passed    0.02 sec
+    Start 3: timeline_fixture_transactions
+3/4 Test #3: timeline_fixture_transactions ....   Passed    0.02 sec
+    Start 4: fixture_sources
+4/4 Test #4: fixture_sources ..................   Passed    0.78 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =   0.82 sec
+-- The C compiler identification is Clang 17.0.0
+-- The CXX compiler identification is Clang 17.0.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/local/swift/usr/bin/clang - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/local/swift/usr/bin/clang++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (5.9s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/implementation/asan-core
+[ 22%] Building CXX object CMakeFiles/ayra_lab_core.dir/generated/FixtureData.cpp.o
+[ 22%] Building CXX object CMakeFiles/ayra_lab_core.dir/core/LabModel.cpp.o
+[ 33%] Linking CXX static library libayra_lab_core.a
+[ 33%] Built target ayra_lab_core
+[ 55%] Building CXX object CMakeFiles/ayra_timeline_panel_tests.dir/tests/TimelinePanelTests.cpp.o
+[ 55%] Building CXX object CMakeFiles/ayra_lab_tests.dir/tests/CoreTests.cpp.o
+[ 66%] Linking CXX executable ayra_lab_tests
+[ 66%] Built target ayra_lab_tests
+[ 77%] Building CXX object CMakeFiles/ayra_panel_fixture_tests.dir/tests/PanelFixtureTests.cpp.o
+[ 88%] Linking CXX executable ayra_timeline_panel_tests
+[ 88%] Built target ayra_timeline_panel_tests
+[100%] Linking CXX executable ayra_panel_fixture_tests
+[100%] Built target ayra_panel_fixture_tests
+Internal ctest changing into directory: /mnt/data/implementation/asan-core
+Test project /mnt/data/implementation/asan-core
+    Start 1: core_regressions
+1/4 Test #1: core_regressions .................   Passed    0.02 sec
+    Start 2: timeline_panel_contracts
+2/4 Test #2: timeline_panel_contracts .........   Passed    0.21 sec
+    Start 3: timeline_fixture_transactions
+3/4 Test #3: timeline_fixture_transactions ....   Passed    0.15 sec
+    Start 4: fixture_sources
+4/4 Test #4: fixture_sources ..................   Passed    0.71 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =   1.10 sec

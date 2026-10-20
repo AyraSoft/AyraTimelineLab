@@ -1,103 +1,93 @@
-# Ayra Timeline Panel — presentation prototype
+# Ayra Timeline Panel — no-header presentation
 
-**Status: tested headless core + uncompiled native integration candidate.**
-This module is a proposed presentation boundary, not a replacement for the existing
-`ayra_timeline` document, edit planners, sources, transport, or runtime.
+`TimelineModel.h` is C++20 without JUCE. The native `TimelinePanel.h` consumes it
+and official JUCE. Musical documents, transport, media, DSP and Undo admission
+remain outside the module. The default demo uses **free lanes**; the existing
+structured projection is retained for comparison, not redesigned in this iteration.
 
-## Files and ownership
+## One provider for geometry and residency
 
-`TimelineModel.h` is portable C++20. `Snapshot` is derived, read-only display data;
-`Controller` owns only `ViewState`, geometry, lane selection, navigation indices
-and bounded view Undo. `CommandSink` sends semantic requests with session and
-revision to an external owner. There is no media, DSP, file I/O or musical write.
+The module includes `<ayra_timeline/ayra_timeline_presentation.h>` from an external
+checkout at `caa00902` or compatible. No fallback implementation is copied here.
 
-`TimelinePanel.h` hosts a `CanvasFactory`, a read-only `PanelStyle`, and a separate
-`TimelinePanelLookAndFeel` interface. Existing clip geometry and pointer ownership
-remain in the supplied canvases. The module does not include Lab/Multiverse types.
-The interface CMake target is `ayra_timeline_panel`; including the native header
-additionally requires the host to link official JUCE 8 `juce_gui_basics` or above.
+- `TimelineRowIndex` supplies incremental height/hide queries. The native path
+  visits its window directly; legacy `rows()` top offsets are refreshed lazily.
+- `TimelineRowResidency` limits mounted/idle UI resources and preserves stable IDs.
+  Active gestures and text editors obtain retention through `hasInteraction`.
+- `TimelineTimeWindow` supplies viewport-relative display seconds. Horizontal
+  scrolling never creates a component as wide as the whole Song.
+- `layoutTimelineLaneChrome` supplies the same bounds for side controls and hit tests.
+- `TimelineIntervalIndex` is reused by the demo's derived `PanelClipWindow` to
+  project visible clips, retaining dependency partners and a full gesture scope.
 
-`../../demo/PanelFixture.h` is the only synthetic document adapter. It is NOT a
-provider to promote into production. The demo's one existing Lab Store owns an
-immutable metadata sidecar plus the old compatibility rows consumed by canvases.
-The metadata is authoritative for owner controls; compatibility row copies are
-read projections, not independent track states.
+One shared time origin is determined from the configured side-control requirements,
+not the currently visible rows. Vertical scroll therefore cannot shift musical X.
+Per-lane content rectangles clip the same coordinate system; hiding chrome returns
+its space without independently fitting each lane. Names/gradients overlay content
+and do not subtract another region. `seamHeight` is zero.
 
-## Frozen design decisions for this experiment
+## View state and commands
 
-No input/output meters and no faders. Owner accent and settings-derived stream
-colour remain independent. Audio/MIDI/DMX/etc. are lane capabilities, never a
-track role inferred from a name. In production inject the same type-colour resolver
-used by Tensor and its settings. The demo's editable palette is explicitly a fixture.
+The Controller owns layout mode/order/groups, selected and hidden lane IDs, height
+previews, chrome preferences and bounded view Undo. Reordering never reparents
+musical data. Structured layout groups contain whole owners; free groups contain
+lane IDs; switching modes never widens a partial group silently.
 
-One owner has one Mute, Solo and Monitoring policy regardless of displayed lane
-count. Open addresses that owner. Monitoring is not a lane-local SourceSlot control;
-production wiring must map the owner intent onto the canonical monitoring service.
-Song Main capability suppresses Solo. Owner controls and musical effectiveness are
-different: the module must not reconstruct the runtime audibility resolver.
+Snapshot owner/lane/event IDs remain external identities. Commands carry session,
+revision, owner and the relevant lane/event scope. Rename changes a lane label;
+M/S/Monitoring/Open address its owner. Song Main has no Solo. Previous/next address
+the lane, not every lane of that owner. The host admits commands atomically.
 
-A fixed 16 px side rail carries owner accent, bounded hierarchy guides and stream
-colour. Hierarchy depth NEVER changes temporal X. Compact controls and bounded
-identity labels live in the 24 px separator below each lane's full canvas bounds.
-The bottom 4 px is resize hit space, not clip gesture space. No floating overlay
-captures clicks over clip handles. Drag the accent to reorder. Body height changes
-independently per lane; preview is transient, Escape cancels, release makes one view
-Undo. Double-click the separator cycles 96/256/400 subject to lane limits.
+`HeightPolicy::compact` rejects manual resize; `automatic` accepts a content height;
+`manual` supports preview, Escape cancel and one view Undo on release. A supplied
+`LaneCanvas::preferredHeight(width)` reports a pure measurement. The panel coalesces
+that result outside recursive layout. Measurement must not edit the document.
 
-The separator is a first native layout candidate, not a user-approved pixel layout.
-It intentionally trades 24 px of separation for non-overlapping controls.
+## LaneCanvas boundary
 
-## View modes and relations
+The host supplies a component plus `bind`, `saveState`, `hasInteraction`, optional
+`eventTimes` and optional `preferredHeight`. Source/editor state belongs to a host
+cache or canonical owner, not an evictable row. The demo captures the existing typed
+canvas state, keyed by both lane ID and visual kind; changing kind remounts only that
+row. Clip IDs outside the viewport remain known, while actual deletion prunes state.
 
-Structured mode follows declared owner parentage and preserves an empty/collapsed
-owner summary, including convergence/MIX. Reordering cannot reparent musical data.
-Free mode orders typed lane IDs independently. Switching modes changes only view
-state. Both modes preserve the inactive layout groups; a partial free group NEVER
-silently widens into whole tracks. Structured layout groups use whole owner IDs,
-free layout groups use lane IDs. Pinned rows are fixed in order, not a separate
-frozen-scroll viewport in this prototype.
+`NameInput` forwards the first pointer gesture to the real underlying target with
+converted coordinates. The second click on the text is swallowed and opens the
+inline editor. The passive gradient never intercepts input. Interactive side buttons
+and accents are separate children. The resize glyph is paint only; its bottom hit
+region is a distinct child and never adds height.
 
-Three concepts are explicit:
+## Artwork and optional meters
 
-- **LayoutGroup**: vertical arrangement only, scoped to one view mode.
-- **temporalGroup**: reversible same-lane temporal grouping, without media render.
-- **clipLink**: explicit clip references across lanes; physical geometry propagates,
-  while gain, fade, colour and owner control remain independent.
+`TimelinePanelLookAndFeel` is a borrowed interface. The demo delegates recessed wells
+to `ayra::drawFlagToolbarWell`, accents to `ayra::drawAccentSpine`, icons to existing
+`ShapeIconButton`/Ayra glyphs, meters to the existing `drawVMeter`. It does not copy
+Multiverse's private widgets or invent a second meter painter. The new name gradient
+is composition-specific and uses the injected palette, not a duplicate global widget.
 
-The fixture's temporal group is NOT `prepareGlueAudioSelection`: canonical Audio
-Glue requires a worker-produced immutable PCM asset and exact Dissolve provenance.
-No PCM Glue/Bounce is performed here. The product must retain those existing owners.
-Cross-owner links require product-level multi-owner admission, not merely a GUI Undo.
+Type colours and owner colours remain separate. Neutral global lanes use theme
+roles; the product adapter must supply its actual settings resolver. Meter count and
+readback are host capabilities, not exclusions based on visual kind. One panel timer
+updates visible meter rectangles only. Missing data is not treated as a live signal.
+The demo explicitly supplies synthetic readback, disabled by default.
 
-In the fixture a geometry/delete request closes over the explicit group/link graph,
-checks locks/conflicting deltas/all bounds, and submits one candidate to the existing
-Store. No partial publication is allowed. Split/duplicate during a linked geometry
-change is rejected rather than inventing relation-aware splitting. Fade/warp/note
-editor internals already local to old canvases have not gained canonical persistence
-or whole-link time-stretch semantics by this change.
+## Scope of verification
 
-## Performance and lifetime
+The actual native panel is tested with instrumented canvases for hit regions,
+name passthrough/rename, compact/manual/automatic height, identity changes, common X,
+viewport width, hide/reveal and 10,000 logical rows. The maximum observed residency
+is 15 in that fixed workload. This is **not** a frame-time benchmark of 10,000 real
+Audio/MIDI canvases. The real demo was separately launched and captured on Linux.
+See `../../verification/no-header/STATUS.md` for exact runs and limitations.
 
-Viewport range lookup is binary; navigation uses sorted event starts and has no
-wrap. Summary navigation includes descendant document events. No paint-time decoding
-or projection is introduced. Rows are mounted lazily; pure scroll does not rebind an
-unchanged canvas frame. Visited rows are retained because the approved legacy
-canvases contain local editor state. This is **not** bounded eviction virtualization,
-not zero-allocation certification, and not a measured native performance improvement.
-Session/revision guards reject stale asynchronous commands. Destroy the native panel
-before its Controller, factory-captured services and borrowed LookAndFeel.
+## Porting
 
-## Integration into Multiverse
+Promote the presentation contracts, not `demo/` fixtures. Map real
+`TensorTimelineBandView.busId/laneId`, Song/Performer/Track identities, capabilities,
+monitoring service, colour resolver, source/event projections and prepared edit
+admission from Multiverse. Its coordinator/TempoMap remains authoritative for
+musical/nonlinear axes. The local 32-second demo source extent is not a product limit.
 
-Read canonical Song/Performer/Track/convergence identities from `TimelineProjection`;
-map `TensorTimelineBandView.busId/laneId` explicitly. Do not use a display row index as
-an authoring destination. Supply existing clip providers to `CanvasFactory`, canonical
-owner capability/effective-state readers to the projection, settings colour resolution
-to `PanelStyle`, and document edit admission to `CommandSink`. Musical coordinates
-here are already resolved display seconds: beat/sample/timecode conversion must remain
-with the canonical TempoMap/anchor services. No second time conversion formula belongs
-in this module. The demo retains the legacy canvas 32-second extent; the generic panel
-exposes `setTimeExtent`, which a production factory must consume consistently.
-
-Do not copy `demo/`, legacy Store limits, synthetic waveforms, local curve states,
-monitor policy cycling or fixture safety limits into the product.
+The previous canonical TimelineComponent is not silently replaced by this adapter.
+Its other hosts require explicit canvas-lifetime integration. The legacy structured
+summary rows and local event editing still have the documented limits of the Lab.

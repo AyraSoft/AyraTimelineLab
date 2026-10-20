@@ -9,11 +9,11 @@
 #include "ayra_CommonDefaultLookAndFeel_Form.cpp"
 #include "ayra_CommonDefaultLookAndFeel_Inspector.cpp"
 #include "ayra_CommonDefaultLookAndFeel_NodeGraph.cpp"
-#include "ayra_CommonDefaultLookAndFeel_Mixer.cpp"
+#include AYRA_LAB_LAF_FILE(ayra_CommonDefaultLookAndFeel_Mixer.cpp)
 #include "ayra_CommonDefaultLookAndFeel_Timeline.cpp"
 
 // Widgets Controls implementations (included as-is)
-#include "controls/shape_icon_button/ayra_ShapeIconButton.cpp"
-#include "controls/add_button/ayra_AddButton.cpp"
-#include "controls/tab_strip/ayra_TabStrip.cpp"
-#include "controls/drag_value_field/ayra_DragValueField.cpp"
+#include AYRA_LAB_CONTROL_FILE(shape_icon_button/ayra_ShapeIconButton.cpp)
+#include AYRA_LAB_CONTROL_FILE(add_button/ayra_AddButton.cpp)
+#include AYRA_LAB_CONTROL_FILE(tab_strip/ayra_TabStrip.cpp)
+#include AYRA_LAB_CONTROL_FILE(drag_value_field/ayra_DragValueField.cpp)
