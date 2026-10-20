@@ -1,0 +1,70 @@
+name: Prepare verified identity source tree
+on:
+  push:
+    branches: ['work/identity-visual-source-20261020']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct exact reviewed source tree on a separate ready branch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          BASE = 'b214bcc7f960bab44d5e66f4827d8615a813c739'
+          TREE = '44670b18d0c9589919ce32a9918db3d50178d9c6'
+          DIGEST = '9ac21cb23e02f089daa3acd84dbb49bfa0fa4cfc7703de582837e23b4fc2b6fb'
+          READY = 'work/identity-visual-source-ready-20261020'
+          def git(*args, **kwargs):
+              return subprocess.check_output(['git', *args], **kwargs)
+          encoded = ''.join(pathlib.Path(f'.publication/identity-{i}.b64').read_text() for i in range(8))
+          raw = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert len(raw) == 211267 and hashlib.sha256(raw).hexdigest() == DIGEST
+          manifest = json.loads(raw)
+          assert manifest['base'] == BASE and len(manifest['files']) == 65
+          remote = git('ls-remote', 'origin', 'refs/heads/main').decode().split()[0]
+          assert remote == BASE, 'Main changed: inspect and rebase instead of overwriting'
+          git('checkout', '--detach', BASE)
+          seen = set()
+          for item in manifest['files']:
+              path = pathlib.PurePosixPath(item['p'])
+              assert not path.is_absolute() and '..' not in path.parts and path.parts[0] not in ('.git', '.github', '.publication')
+              assert str(path) not in seen and item['m'] in ('100644', '100755')
+              seen.add(str(path))
+              previous = subprocess.run(['git', 'show', BASE + ':' + str(path)], capture_output=True)
+              old = previous.stdout if previous.returncode == 0 else b''
+              if item['b'] is None:
+                  assert previous.returncode != 0, 'Unexpected existing file'
+              else:
+                  assert previous.returncode == 0
+                  blob_hash = hashlib.sha1(b'blob ' + str(len(old)).encode() + b'\0' + old).hexdigest()
+                  assert blob_hash == item['b'], 'Base file hash mismatch: ' + str(path)
+              text = old.decode('utf-8')
+              data = list(text) if item['c'] else text.splitlines(keepends=True)
+              previous_start = len(data) + 1
+              for start, end, replacement in reversed(item['e']):
+                  assert 0 <= start <= end <= len(data) and end < previous_start
+                  previous_start = start
+                  data[start:end] = list(replacement) if item['c'] else replacement.splitlines(keepends=True)
+              destination = pathlib.Path(path)
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              assert not destination.is_symlink()
+              destination.write_bytes(''.join(data).encode('utf-8'))
+              destination.chmod(int(item['m'], 8) & 0o777)
+              git('add', '--', str(path))
+          actual = git('write-tree').decode().strip()
+          assert actual == TREE, 'Tree differs from tested workspace: ' + actual
+          git('config', 'user.name', 'Ayra Soft')
+          git('config', 'user.email', '131635008+AyraSoft@users.noreply.github.com')
+          commit = git('commit-tree', actual, '-p', BASE, '-m', 'Prepare reviewed no-header and identity visual-source implementation').decode().strip()
+          git('push', 'origin', commit + ':refs/heads/' + READY)
+          print('VERIFIED_TREE=' + actual)
+          print('READY_COMMIT=' + commit)
+          print('Only ready branch updated. Main publication remains a separate reviewed connector action.')
+          PY
