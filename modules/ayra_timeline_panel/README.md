@@ -1,6 +1,7 @@
-> Current identity override: compact HTML frosted lens, no editable text,
-> no input forwarding proxy. Hide only on a real clip hit and retain that state
-> until pointer exit. See `docs/FROSTED_LENS.md` for the current contract.
+> Current contract: names and state indicators are passive, only previous/next
+> in the card intercept input. One panel scheduler hides the card after 500 ms
+> over real editable content, protected by navigation hover; no per-row timer.
+> See `../../docs/CARD_STATUS_AND_NAVIGATION.md`.
 
 # Ayra Timeline Panel — no-header presentation
 
@@ -12,7 +13,7 @@ structured projection is retained for comparison, not redesigned in this iterati
 ## One provider for geometry and residency
 
 The module includes `<ayra_timeline/ayra_timeline_presentation.h>` from an external
-checkout at `caa00902` or compatible. No fallback implementation is copied here.
+checkout at `ddf196e9` or compatible. No fallback implementation is copied here.
 
 - `TimelineRowIndex` supplies incremental height/hide queries. The native path
   visits its window directly; legacy `rows()` top offsets are refreshed lazily.
@@ -55,11 +56,22 @@ cache or canonical owner, not an evictable row. The demo captures the existing t
 canvas state, keyed by both lane ID and visual kind; changing kind remounts only that
 row. Clip IDs outside the viewport remain known, while actual deletion prunes state.
 
-`NameInput` forwards the first pointer gesture to the real underlying target with
-converted coordinates. The second click on the text is swallowed and opens the
-inline editor. The passive gradient never intercepts input. Interactive side buttons
-and accents are separate children. The resize glyph is paint only; its bottom hit
-region is a distinct child and never adds height.
+`containsEditableAt` uses the exact canvas input geometry (clips, points, span
+edges, curve segments and handles). `containsClipAt` remains a compatibility
+fallback. Missing callbacks never invent editable regions. Passive text does not
+intercept events or own an editor. The card's two navigation children have 16x18
+logical-pixel targets; hidden cards have no invisible buttons. `eventTimes` supplies
+local editor targets; otherwise the controller uses canonical snapshot events.
+
+`Owner::status` is a read-only host projection, shared by every lane of that owner.
+The seven effective booleans do not change the monitoring policy, document flags or
+runtime. Monitoring Auto is not proof of activity; `canvasActive` is not row visibility.
+`muted/soloed` remain the existing owner fields, independent of side control visibility.
+
+`ViewState::identityNavigation` defaults true. The old side `chrome` APIs, buttons,
+wells, callbacks and their height law are preserved but default to hidden, like meters.
+The resize marker defaults hidden; the bottom hit region still resizes manual lanes.
+Continuous lanes remain manually resizable, but do not cycle height on double-click.
 
 ## Artwork and optional meters
 
@@ -78,11 +90,12 @@ The demo explicitly supplies synthetic readback, disabled by default.
 ## Scope of verification
 
 The actual native panel is tested with instrumented canvases for hit regions,
-name passthrough/rename, compact/manual/automatic height, identity changes, common X,
+passive identity/navigation/status, compact/manual/automatic height, identity changes, common X,
 viewport width, hide/reveal and 10,000 logical rows. The maximum observed residency
 is 15 in that fixed workload. This is **not** a frame-time benchmark of 10,000 real
 Audio/MIDI canvases. The real demo was separately launched and captured on Linux.
-See `../../verification/no-header/STATUS.md` for exact runs and limitations.
+See `../../verification/card-status/STATUS.md` for current runs and limitations.
+Older full-application evidence remains scoped to its original revision.
 
 ## Porting
 

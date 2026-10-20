@@ -13,7 +13,17 @@ assert 'LabComponent' not in surface and 'LabModel' not in surface
 assert 'TimelineRowResidency' in surface and 'controller.visitRows' in surface
 assert 'layoutTimelineLaneChrome' in surface
 assert 'NameInput' not in surface and 'nameEditor' not in surface and 'beginRename' not in surface
-assert 'containsClipAt' in surface and 'PointerObserver' in surface
+assert 'containsClipAt' in surface and 'containsEditableAt' in surface and 'PointerObserver' in surface
+assert surface.count('private juce::Timer')==1
+assert 'identityDue' in surface and 'scheduleIdentity' in surface
+assert 'getIdentityReadout' in surface and 'setIdentityNavigation' in surface
+status=(root/'demo/TimelineStatusArtwork.h').read_text()
+assert 'nodeButtonGlyph' in status and 'nodeButtonActiveColour' in status
+assert 'juce::Colour(0x' not in status and 'juce::Timer' not in status
+for path in ('app/clips/continous/ayra_ContinuousLineCanvas.cpp','app/clips/keyframe/ayra_KeyframeLaneCanvas.cpp'):
+    source=(root/path).read_text()
+    assert source.index('containsPanelEditableAt')<source.index('private:')
+assert 'Every canvas must expose its real editable-content hit geometry' in demo
 assert 'TimelineIdentityHoverState' in surface and 'notifyCanvasContentChanged' in surface
 assert 'demo/TimelinePanelDemo.cpp' in cmake and '\n    app/LabComponent.cpp\n' not in cmake
 assert demo.count('#include "../app/LabComponent.cpp"')==1

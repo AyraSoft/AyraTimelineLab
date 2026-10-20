@@ -11,14 +11,18 @@ libera. Il contenuto scorre nel tempo; nome, accenti e controlli restano nel vie
 La card resta centrata verticalmente anche durante il resize. Il Performer è a
 sinistra; tipo e nome traccia sono allineati a destra. Il bordo sinistro del
 fondale (blur e riflesso compresi) scompare prima degli angoli.
-È compatta, non editabile e lascia passare tutti i gesti alle clip. Si nasconde
-soltanto quando il puntatore incontra una clip sotto la lente, poi riappare
-all'uscita dalla sua area. Nessuna fascia header e nessuna rinomina dai nomi.
+È compatta e non editabile. Solo le due frecce subito dopo il tipo sono pulsanti:
+nomi e indicatori lasciano passare i gesti al contenuto sottostante. Sopra clip,
+linee, punti e span, l'attesa di 500 ms nasconde la lente; le frecce annullano
+l'attesa e uscirne la riavvia. Una lente nascosta riappare all'uscita dalla sua area.
+M gialla e S rossa seguono il nome della traccia; le altre sette indicazioni sono
+piccoli glyph passivi presenti soltanto quando attivi. Nessuna terza riga.
 
 La build nativa richiede per default i sorgenti visuali originali di Multiverse
 in `AYRA_SOURCE_DIR`. Lo snapshot locale è un opt-out dichiarato nella UI.
 Vedere [contratto della lente](docs/FROSTED_LENS.md) e
-[verifica corrente](verification/lane-polish/STATUS.md).
+[contratto di navigazione/stato](docs/CARD_STATUS_AND_NAVIGATION.md) e
+[verifica corrente](verification/card-status/STATUS.md).
 
 ### Utilizzo
 
@@ -28,22 +32,25 @@ M/S e Monitoring sono condivisi dall'owner. Open apre l'inspector fixture, non u
 processore Tensor. I pulsanti `<` e `>` navigano la lane, compresi gli eventi locali
 di Marker/Metrica/Counter e i punti delle linee continue.
 
-Il menu **Visibilità** nasconde singoli controlli, meter e indicatore di resize.
+I controlli laterali e i meter sono tutti **nascosti per default**, senza eliminarne
+le API. Il menu **Visibilità** permette di riattivarli singolarmente e separa la
+navigazione nella card dalla navigazione laterale legacy.
 Nome/gradiente e accento non si possono disattivare dal menu: nome sinistra/destra,
 accento sinistra/destra/entrambi. La lente ha la sola scomparsa temporanea
-clip-aware descritta sopra. Anche il doppio click raggiunge il canvas: nessun
+content-aware descritta sopra. Anche il doppio click raggiunge il canvas: nessun
 editor del nome viene aperto. Il bordo inferiore ridimensiona soltanto
 le lane manuali. Marker, Metrica e Counter restano compatti.
-Ogni lato ha un unico well recessed per tutti i suoi pulsanti. Le frecce sono
+Riattivando i controlli laterali, ogni lato conserva il proprio unico well recessed. Le frecce sono
 i chevron singoli `<`/`>`, non icone di trasporto. Gli accenti laterali usano
 soltanto il colore della traccia: il colore tipo resta nel pallino della card.
-L’altezza rispetta sempre i controlli visibili: 56 px per due righe di bottoni,
+Solo i controlli laterali realmente visibili impongono il proprio floor: 56 px per due righe di bottoni,
 32 px per la sola navigazione, senza imporre quel minimo alle lane prive di bottoni.
 
 I meter sono **sintetici, opzionali e spenti al primo avvio**, anche sulle lane
 non audio; il loro painter è quello Ayra già presente nel Lab. I colori di tipo
 sono modificabili separatamente dal colore della traccia. Le corsie globali
-usano colori neutri del tema. La demo non riproduce audio.
+usano colori neutri del tema. La demo non riproduce audio. Anche gli stati DSP/canvas/monitoring sono readback
+dimostrativi espliciti, non un motore attivo o valori dedotti dal tipo della lane.
 
 ### Build
 

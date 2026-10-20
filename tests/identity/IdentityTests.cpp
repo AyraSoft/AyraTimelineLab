@@ -108,6 +108,46 @@ juce::Image groupedShowcase(bool dark, bool namesOnLeft)
     }
     return image;
 }
+juce::Image statusShowcase(bool dark,bool left,float scale)
+{
+    using namespace ayra::lab;
+    ayra::tokens::setThemeMode(dark?ayra::tokens::Mode::Dark:ayra::tokens::Mode::Light);
+    const int width=1080,height=506;
+    juce::Image image(juce::Image::ARGB,juce::roundToInt(width*scale),juce::roundToInt(height*scale),true);
+    juce::Graphics g(image);g.addTransform(juce::AffineTransform::scale(scale));
+    g.fillAll(dark?juce::Colour(0xff090c12):juce::Colour(0xfff4f6fa));
+    g.setColour(ayra::tokens::textPrimary());g.setFont(ayra::tokens::type::body().boldened());
+    g.drawText("Navigazione nella card / stato traccia passivo / controlli laterali nascosti",16,8,1040,26,juce::Justification::centredLeft);
+    const std::array<juce::String,5> titles{"Backing","Lead Vocals","Keys","Guitar","Track with an intentionally long name"};
+    for(int i=0;i<5;++i){
+        const juce::Rectangle<int> row(12,42+i*82,1056,76);
+        const auto colour=i==2?ayra::tokens::streamMidi():ayra::tokens::streamAudio();
+        lane(g,row,dark,colour,i==2?1:0);
+        g.setColour(juce::Colour(0xff5bb6bd));g.fillRoundedRectangle(row.withWidth(6).toFloat(),2);
+        TimelineIdentityContent c;c.performer=i<3?"Ayra":"Noah";c.track=titles[i];c.type=i==2?"MIDI":"Audio";
+        c.typeColour=colour;c.navigation=true;c.onLeft=left;
+        c.muted=i==0||i==4;c.soloed=i==2||i==4;
+        if(i==1){c.status.canvasActive=true;c.status.monitoringActive=true;}
+        if(i==2){c.status.bufferized=true;c.status.oversampled=true;c.status.latencyCompensated=true;}
+        if(i==3){c.status.shutdown=true;c.status.bypassed=true;}
+        if(i==4)c.status={true,true,true,true,true,true,true};
+        const auto layout=TimelineIdentityLayout::make(row.withTrimmedLeft(8),c,TimelineIdentityArtwork::typography());
+        const auto sample=layout.backdrop.expanded(15).getIntersection(row);
+        const auto pixels=image.getClippedImage((sample.toFloat()*scale).toNearestInt()).createCopy();
+        const auto blur=TimelineIdentityArtwork::prepareUnderlay(pixels,scale,layout,sample);
+        TimelineIdentityArtwork::drawUnderlay(g,layout,blur,sample);
+        TimelineIdentityArtwork::draw(g,c,layout,TimelineIdentityArtwork::prepare(c,layout));
+        for(int n=0;n<2;++n){
+            auto button=TimelineLaneControls::makeButton(n==0?LaneButton::previous:LaneButton::next);
+            button->setBounds(n==0?layout.previous:layout.next);
+            auto art=button->createComponentSnapshot(button->getLocalBounds(),true,scale);
+            g.drawImage(art,button->getBounds().toFloat());
+        }
+    }
+    g.setColour(ayra::tokens::textSecondary());g.setFont(ayra::tokens::type::caption());
+    g.drawText("Fixture nativa JUCE con stati dimostrativi / glifi Ayra originali selezionati / nessun motore audio",16,466,1040,24,juce::Justification::centredLeft);
+    return image;
+}
 
 }
 int main(int argc,char** argv)
@@ -116,12 +156,18 @@ int main(int argc,char** argv)
     const auto output=argc>1?juce::File(juce::String(argv[1])):juce::File::getCurrentWorkingDirectory();
     CHECK(output.createDirectory().wasOk());
     TimelineIdentityHoverState hover;
-    CHECK(!hover.hidden());CHECK(!hover.update(true,false));
-    CHECK(hover.update(true,true));CHECK(hover.hidden());
-    CHECK(!hover.update(true,false));CHECK(hover.hidden());
-    CHECK(hover.update(false,true));CHECK(!hover.hidden());
-    CHECK(!hover.update(false,false));CHECK(!hover.update(true,false));
-    hover.update(true,true);hover.reset();CHECK(!hover.hidden());
+    CHECK(!hover.hidden());CHECK(!hover.update(true,false,false,0));CHECK(!hover.deadline());
+    CHECK(!hover.update(true,true,false,100));CHECK(hover.deadline()==600);
+    CHECK(!hover.update(true,true,false,400));CHECK(hover.deadline()==600);
+    CHECK(!hover.update(true,true,true,590));CHECK(!hover.deadline());
+    CHECK(!hover.update(true,true,true,4000));CHECK(!hover.hidden());
+    CHECK(!hover.update(true,true,false,4010));CHECK(hover.deadline()==4510);
+    CHECK(!hover.update(true,true,false,4509));CHECK(hover.update(true,true,false,4510));CHECK(hover.hidden());
+    CHECK(!hover.update(true,false,false,5000));CHECK(hover.hidden());
+    CHECK(!hover.update(true,true,true,5100));CHECK(hover.hidden()); // invisible arrows cannot re-open
+    CHECK(hover.update(false,true,false,5200));CHECK(!hover.hidden());CHECK(!hover.deadline());
+    CHECK(!hover.update(true,true,false,5300));CHECK(!hover.update(true,false,false,5400));CHECK(!hover.deadline());
+    CHECK(hover.update(true,true,false,5500,true));CHECK(hover.hidden());hover.reset();CHECK(!hover.hidden());
     for(bool dark:{true,false}){
         ayra::tokens::setThemeMode(dark?ayra::tokens::Mode::Dark:ayra::tokens::Mode::Light);
         const auto fonts=TimelineIdentityArtwork::typography();
@@ -147,6 +193,19 @@ int main(int argc,char** argv)
         for(bool left:{false,true})for(float scale:{1.0f,1.25f,1.5f,2.0f})
             writePng(output.getChildFile(juce::String(dark?"lens-dark-":"lens-light-")+(left?"left-":"right-")+juce::String(scale,2)+".png"),showcase(dark,scale,left));
     }
+    for(int flags=0;flags<128;++flags)for(int ms=0;ms<4;++ms)for(bool left:{false,true}) {
+        TimelineIdentityContent c;c.performer="Performer";c.track="Backing";c.type="Audio";c.navigation=true;c.onLeft=left;
+        c.muted=(ms&1)!=0;c.soloed=(ms&2)!=0;
+        c.status={bool(flags&1),bool(flags&2),bool(flags&4),bool(flags&8),bool(flags&16),bool(flags&32),bool(flags&64)};
+        const auto l=TimelineIdentityLayout::make({0,0,800,96},c,TimelineIdentityArtwork::typography());
+        CHECK(l.previous.getWidth()==16&&l.next.getHeight()==18);CHECK(l.previous.getRight()+2==l.next.getX());
+        CHECK(l.type.getRight()<l.previous.getX());CHECK(l.backdrop.getWidth()<=229);CHECK(l.backdrop.getHeight()==40);
+        CHECK(l.mute.isEmpty()==!c.muted);CHECK(l.solo.isEmpty()==!c.soloed);
+        CHECK(!c.muted||l.mute.getX()>l.track.getRight());CHECK(!c.soloed||l.solo.getX()>l.track.getRight());
+        const auto active=activeTrackIndicators(c.status);
+        for(std::size_t i=0;i<active.size();++i){CHECK(l.indicators[i].isEmpty()==!active[i]);
+            if(active[i]){CHECK(l.indicators[i].getWidth()==6);CHECK(l.indicators[i].getRight()<l.track.getX());}}
+    }
     for(bool dark:{true,false})for(bool left:{false,true})
         writePng(output.getChildFile(juce::String("grouped-")+(dark?"dark-":"light-")+(left?"left":"right")+".png"),groupedShowcase(dark,left));
     juce::Image stripes(juce::Image::ARGB,80,40,true);
@@ -169,6 +228,8 @@ int main(int argc,char** argv)
         while(it.next()){moves+=it.elementType==juce::Path::Iterator::startNewSubPath;lines+=it.elementType==juce::Path::Iterator::lineTo;CHECK(it.elementType!=juce::Path::Iterator::closePath);}
         CHECK(moves==1&&lines==2);
     }
+    for(bool dark:{true,false})for(bool left:{false,true})for(float scale:{1.0f,2.0f})
+        writePng(output.getChildFile(juce::String("status-")+(dark?"dark-":"light-")+(left?"left-":"right-")+juce::String(scale,1)+".png"),statusShowcase(dark,left,scale));
     ayra::shadowCache().clear();juce::ImageCache::releaseUnusedImages();
     std::cout<<"PASS "<<checks<<" frosted lens layout/render/hover assertions; native JUCE painter fixtures\n";
 }

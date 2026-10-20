@@ -76,6 +76,9 @@ public:
         }
     }
 
+    bool containsPanelEditableAt(juce::Point<float> p)const
+    {return hitTestEvent(p).zone!=HitZone::none;}
+
     explicit KeyframeLaneCanvas (LabComponent& h, KeyframeLaneType type = KeyframeLaneType::contiguousSpans)
         : host (h), laneType (type)
     {

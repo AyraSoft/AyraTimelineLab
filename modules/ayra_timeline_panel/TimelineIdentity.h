@@ -1,9 +1,11 @@
-/** View-only floating identity. Layout follows fixtures/frosted-lens.html.
-    No document writes, mouse interception, reserved row height or media policy.
-    CSS sizes are logical pixels; the host supplies typography and artwork. */
+/** View-only floating identity. Material follows fixtures/frosted-lens.html.
+    Names/status are passive. Only the two navigation targets intercept input.
+    Geometry is viewport-local and never reserves row height or musical time. */
 #pragma once
+#include "TimelineTrackStatus.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <cmath>
+#include <optional>
 
 namespace ayra::timeline_panel
 {
@@ -12,6 +14,8 @@ struct TimelineIdentityContent
     juce::String performer, track, type;
     juce::Colour ownerColour, typeColour;
     bool compact = false, onLeft = false, selected = false, showType = true;
+    bool navigation = false, muted = false, soloed = false;
+    TrackStatus status{};
     bool operator==(const TimelineIdentityContent&) const = default;
 };
 struct TimelineIdentityTypography
@@ -22,98 +26,115 @@ struct TimelineIdentityTypography
 };
 struct TimelineIdentityLayout
 {
-    // backdrop also defines the STABLE hover footprint, even while invisible.
     juce::Rectangle<int> backdrop, performer, track, type, typeMark;
+    juce::Rectangle<int> previous,next,navigationGroup,mute,solo;
+    std::array<juce::Rectangle<int>,trackIndicatorCount> indicators{};
     bool twoLines = false;
     juce::Font trackFont {juce::FontOptions{}}, performerFont {juce::FontOptions{}}, typeFont {juce::FontOptions{}};
-    static constexpr int maxWidth = 229; // CSS max-width 205 + horizontal padding 10 + 14
-    static constexpr int minWidth = 144; // CSS min-width 120 + the same padding
-    static constexpr int normalHeight = 40;
-
+    static constexpr int maxWidth=229,minWidth=144,normalHeight=40;
+    static constexpr int navigationWidth=16,navigationHeight=18,indicatorSize=6,indicatorGap=3;
     static int measuredWidth(const juce::Font& font, const juce::String& text)
     {
-        if (text.isEmpty()) return 0;
-        juce::GlyphArrangement glyphs;
-        glyphs.addLineOfText(font, text, 0, 0);
-        return juce::roundToInt(std::ceil(glyphs.getBoundingBox(0, -1, true).getWidth())) + 2;
+        if(text.isEmpty())return 0;
+        return juce::GlyphArrangement::getStringWidthInt(font,text)+2;
     }
-    [[nodiscard]] static TimelineIdentityLayout make(
-        juce::Rectangle<int> area, const TimelineIdentityContent& content,
-        const TimelineIdentityTypography& fonts)
+    [[nodiscard]] static TimelineIdentityLayout make(juce::Rectangle<int> area,
+        const TimelineIdentityContent& c,const TimelineIdentityTypography& fonts)
     {
         TimelineIdentityLayout out;
-        out.trackFont = fonts.track;
-        out.performerFont = fonts.performer;
-        out.typeFont = fonts.type;
-        if (area.isEmpty()) return out;
-        out.twoLines = !content.compact && area.getHeight() >= normalHeight;
-        const int insetX = juce::jmin(8, area.getWidth() / 8);
-        const int available = juce::jmax(0, area.getWidth() - 2 * insetX);
-        const int typeWidth = content.showType ? measuredWidth(fonts.type, content.type) : 0;
-        const int typeGroup = typeWidth > 0 ? typeWidth + 9 : 0; // 5px dot + 4px gap
-        const int metaWidth = content.performer.isEmpty() ? typeGroup
-            : measuredWidth(fonts.performer, content.performer.toUpperCase()) + 10 + typeGroup;
-        const int titleWidth = measuredWidth(fonts.track, content.track);
-        const int natural = out.twoLines ? juce::jmax(metaWidth, titleWidth)
-                                         : titleWidth + (typeGroup > 0 ? 10 + typeGroup : 0);
-        const int width = juce::jmin(available, juce::jlimit(minWidth, maxWidth, natural + 38));
-        const int height = juce::jmin(area.getHeight(), out.twoLines ? normalHeight : 22);
-        const int top = area.getY() + (area.getHeight() - height) / 2;
-        out.backdrop = {content.onLeft ? area.getX() + insetX : area.getRight() - insetX - width,
-                        top, width, height};
-        // Leave breathing room beyond the fully transparent left corners.
-        const int leftPad = juce::jmin(24, width / 5), rightPad = juce::jmin(14, width / 5);
-        const auto inner = out.backdrop.withTrimmedLeft(leftPad).withTrimmedRight(rightPad);
-        const auto fit = [&](juce::Rectangle<int> r) { return r.getIntersection(out.backdrop); };
-        if (out.twoLines)
-        {
-            const auto meta = fit({inner.getX(), top + 5, inner.getWidth(), 12});
-            // Type has priority over performer in a narrow metadata row; track
-            // retains its own full width. Text never stretches or wraps.
-            const int groupWidth = juce::jmin(typeGroup, meta.getWidth());
-            if (groupWidth >= 14)
-            {
-                const auto group = meta.withLeft(meta.getRight() - groupWidth);
-                out.typeMark = {group.getX(), group.getCentreY() - 2, 5, 5};
-                out.type = group.withTrimmedLeft(9);
-            }
-            if (content.performer.isNotEmpty())
-                out.performer = meta.withWidth(juce::jmax(0, meta.getWidth() - groupWidth - (groupWidth > 0 ? 10 : 0)));
-            out.track = fit({inner.getX(), top + 19, inner.getWidth(), 15});
+        out.trackFont=c.compact?fonts.type:fonts.track;
+        out.performerFont=fonts.performer;out.typeFont=fonts.type;
+        if(area.isEmpty())return out;
+        out.twoLines=!c.compact&&area.getHeight()>=normalHeight;
+        const int inset=juce::jmin(8,area.getWidth()/8);
+        const int available=juce::jmax(0,area.getWidth()-2*inset);
+        const int typeWidth=c.showType&&!c.compact?measuredWidth(fonts.type,c.type):0;
+        const int typeGroup=typeWidth>0?typeWidth+9:0;
+        const int navWidth=c.navigation?2*navigationWidth+2:0;
+        const int meta=measuredWidth(fonts.performer,c.performer.toUpperCase())+10+typeGroup+navWidth+4;
+        // Indicators share the existing lower line. The fixed maximum remains
+        // 229px even with all states active; long titles elide, never shrink.
+        const auto active=activeTrackIndicators(c.status);
+        const int statusWidth=static_cast<int>(std::count(active.begin(),active.end(),true))*(indicatorSize+indicatorGap);
+        const int letters=(c.muted?measuredWidth(out.trackFont,"M")+4:0)+(c.soloed?measuredWidth(out.trackFont,"S")+4:0);
+        const int natural=out.twoLines?juce::jmax(meta,measuredWidth(out.trackFont,c.track)+statusWidth+letters+navWidth+10)
+                                      :measuredWidth(out.trackFont,c.track)+typeGroup+navWidth+14;
+        const int width=juce::jmin(available,juce::jlimit(minWidth,maxWidth,natural+38));
+        const int height=juce::jmin(area.getHeight(),out.twoLines?normalHeight:22);
+        const int top=area.getY()+(area.getHeight()-height)/2;
+        out.backdrop={c.onLeft?area.getX()+inset:area.getRight()-inset-width,top,width,height};
+        const auto inner=out.backdrop.withTrimmedLeft(juce::jmin(24,width/5)).withTrimmedRight(juce::jmin(14,width/5));
+        if(inner.isEmpty())return out;
+        auto metaRow=juce::Rectangle<int>(inner.getX(),out.twoLines?top+2:top+(height-navigationHeight)/2,
+                                        inner.getWidth(),juce::jmin(height,navigationHeight)).getIntersection(out.backdrop);
+        if(c.navigation&&metaRow.getWidth()>=2*navigationWidth+24&&height>=navigationHeight) {
+            out.next=metaRow.removeFromRight(navigationWidth);
+            metaRow.removeFromRight(2);
+            out.previous=metaRow.removeFromRight(navigationWidth);
+            out.navigationGroup=out.previous.getUnion(out.next);metaRow.removeFromRight(4);
         }
-        else
-        {
-            // Global/short lanes do not grow to accommodate a name. One line,
-            // track first; type drops out before the title becomes illegible.
-            out.track = fit({inner.getX(), top + (height - 15) / 2, inner.getWidth(), 15});
-            if (typeGroup > 0 && inner.getWidth() >= typeGroup + 60)
-            {
-                const auto group = out.track.withLeft(inner.getRight() - typeGroup);
-                out.typeMark = {group.getX(), group.getCentreY() - 2, 5, 5};
-                out.type = group.withTrimmedLeft(9);
-                out.track.setWidth(juce::jmax(0, out.track.getWidth() - typeGroup - 10));
-            }
+        auto title=out.twoLines?juce::Rectangle<int>(inner.getX(),top+19,inner.getWidth(),15):metaRow;
+        if(out.twoLines&&typeGroup>0&&metaRow.getWidth()>=14) {
+            auto group=metaRow.removeFromRight(juce::jmin(typeGroup,metaRow.getWidth()));
+            out.typeMark={group.getX(),group.getCentreY()-2,5,5};out.type=group.withTrimmedLeft(9).withSizeKeepingCentre(juce::jmax(0,group.getWidth()-9),12);
+            metaRow.removeFromRight(10);
         }
+        if(out.twoLines&&!c.performer.isEmpty())out.performer=metaRow.withSizeKeepingCentre(metaRow.getWidth(),12);
+        if(out.twoLines&&!out.type.isEmpty())title.setRight(out.type.getRight());
+        if(c.compact&&c.showType&&title.getWidth()>=14) {
+            out.typeMark={title.getX(),title.getCentreY()-2,5,5};title.removeFromLeft(9);
+        } else if(!out.twoLines&&typeGroup>0&&title.getWidth()>typeGroup+60) {
+            auto group=title.removeFromRight(typeGroup);
+            out.typeMark={group.getX(),group.getCentreY()-2,5,5};out.type=group.withTrimmedLeft(9);
+            title.removeFromRight(10);
+        }
+        // Explicit flags only, independent of side-button visibility or policy.
+        // Both M and S can be present. They have exactly the title's typography.
+        const auto letter=[&](bool active,const char* value,juce::Rectangle<int>& rect) {
+            if(!active)return;
+            const int w=measuredWidth(out.trackFont,value);
+            if(title.getWidth()>=w+8){rect=title.removeFromRight(w);title.removeFromRight(4);}
+        };
+        letter(c.soloed,"S",out.solo);letter(c.muted,"M",out.mute);
+        auto flags=activeTrackIndicators(c.status);
+        int count=static_cast<int>(std::count(flags.begin(),flags.end(),true));
+        // Seven 6px glyphs take 60px at most. No rectangles for inactive flags.
+        if(count>0&&title.getWidth()>=count*(indicatorSize+indicatorGap)+12) {
+            for(std::size_t i=0;i<flags.size();++i)if(flags[i]) {
+                out.indicators[i]={title.getX(),title.getCentreY()-indicatorSize/2,indicatorSize,indicatorSize};
+                title.removeFromLeft(indicatorSize+indicatorGap);
+            }
+            title.removeFromLeft(3);
+        }
+        out.track=title.getIntersection(out.backdrop);
         return out;
     }
 };
 
-/** Hide only after a genuine clip hit within the lens. Once suppressed, stay
-    suppressed over gaps/deleted/moved clips until the pointer leaves the same
-    footprint. The painter's visibility never participates in hit testing. */
+/** Pure hover state; the PANEL owns one wake-up timer shared with optional
+    meters. A deadline is not restarted by each mouse move. Once hidden, the
+    same footprint stays suppressed until exit (no invisible navigation hits). */
 class TimelineIdentityHoverState
 {
 public:
-    [[nodiscard]] bool hidden() const noexcept { return suppressed; }
-    bool update(bool inside, bool clipUnderPointer) noexcept
+    static constexpr double delayMilliseconds=500.0;
+    [[nodiscard]] bool hidden()const noexcept{return suppressed;}
+    [[nodiscard]] std::optional<double> deadline()const noexcept{return due;}
+    bool update(bool inside,bool editable,bool navigation,double now,bool editing=false)noexcept
     {
-        const bool next = inside && (suppressed || clipUnderPointer);
-        const bool changed = next != suppressed;
-        suppressed = next;
-        return changed;
+        const bool before=suppressed;
+        if(!inside){reset();return before;}
+        if(suppressed)return false;
+        if(navigation){due.reset();return false;}
+        if(!editable){due.reset();return false;}
+        if(editing){suppressed=true;due.reset();return true;}
+        if(!due)due=now+delayMilliseconds;
+        if(now>=*due){suppressed=true;due.reset();}
+        return before!=suppressed;
     }
-    void reset() noexcept { suppressed = false; }
+    void reset()noexcept{suppressed=false;due.reset();}
 private:
-    bool suppressed = false;
+    bool suppressed=false;
+    std::optional<double> due;
 };
 } // namespace ayra::timeline_panel

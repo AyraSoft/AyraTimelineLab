@@ -76,7 +76,10 @@ struct LaneCanvas
     // Canvas-local, side-effect-free query using the SAME clip/editor geometry
     // as input. A component's rectangular hitTest or a lane time interval is
     // not proof of a clip here. Missing callback = no hover suppression.
-    std::function<bool(juce::Point<float>)> containsClipAt;
+    std::function<bool(juce::Point<float>)> containsClipAt; // compatibility fallback
+    // All real content targets: clips, points, spans, curves and handles. This
+    // must use the canvas input geometry, not its full rectangular hitTest.
+    std::function<bool(juce::Point<float>)> containsEditableAt;
 };
 using CanvasFactory=std::function<LaneCanvas(const Lane&)>;
 struct MeterReadback
@@ -106,7 +109,7 @@ public:
     }
     ~TimelinePanel()override
     {
-        stopTimer();cancelPendingUpdate();controller.endResize(false);cache.clear();
+        shuttingDown=true;stopTimer();cancelPendingUpdate();controller.endResize(false);cache.clear();
         horizontal.removeListener(this);vertical.removeListener(this);
     }
     std::function<void(double)> onSeek;
@@ -121,7 +124,8 @@ public:
     void setTimeExtent(double seconds)
     {if(std::isfinite(seconds)&&seconds>0){durationSeconds=seconds;refresh();}}
     void setPlayhead(double seconds)
-    {if(std::isfinite(seconds)){playhead=std::max(0.0,seconds);repaint();}}
+    {if(std::isfinite(seconds)){playhead=std::max(0.0,seconds);
+        cache.forEach([](const Id&,LaneRow& r,bool visible){if(visible)r.updateNavigationEnabled();});repaint();}}
     double getPlayhead()const noexcept{return playhead;}
     double getViewStart()const noexcept{return time.startSeconds;}
     void setViewStart(double seconds)
@@ -134,6 +138,8 @@ public:
     {controller.setLaneVisible(id,true);scrollY=static_cast<std::int64_t>(controller.laneTop(id));refresh();}
     void setChrome(presentation::TimelineChromeVisibility settings)
     {controller.setChrome(settings);refresh();}
+    void setIdentityNavigation(bool visible)
+    {controller.setIdentityNavigation(visible);refresh();}
     // Read-only inspection ports, also useful for native accessibility tests.
     juce::Rectangle<int> getIdentityBounds(const Id& lane) const
     {
@@ -142,6 +148,9 @@ public:
     }
     bool isIdentitySuppressed(const Id& lane) const
     { if (auto* r=cache.find("lane:"+lane)) return r->identitySuppressed(); return false; }
+    std::optional<TimelineIdentityContent> getIdentityReadout(const Id& lane)const
+    {if(auto* r=cache.find("lane:"+lane))return r->identityReadout();return {};}
+    bool hasPendingIdentityTransition()const noexcept{return identityDue.has_value();}
     // Async waveform/image providers call this when pixels change independently
     // of a CanvasFrame revision. Presentation invalidation, not a document edit.
     void notifyCanvasContentChanged(const Id& lane)
@@ -151,7 +160,7 @@ public:
         if(updating)return;
         const juce::ScopedValueSetter<bool> guard(updating,true);
         const auto& snapshot=controller.snapshot();
-        if(session!=snapshot.session){cache.clear();session=snapshot.session;scrollY=0;originChrome.reset();}
+        if(session!=snapshot.session){pendingIdentity.clear();identityDue.reset();cache.clear();session=snapshot.session;scrollY=0;originChrome.reset();}
         const auto total=static_cast<std::int64_t>(controller.totalHeight());
         scrollY=std::clamp<std::int64_t>(scrollY,0,std::max<std::int64_t>(0,total-body.getHeight()));
         vertical.setRangeLimits(0.0,static_cast<double>(std::max<std::int64_t>(body.getHeight(),total)),juce::dontSendNotification);
@@ -194,10 +203,7 @@ public:
         const double span=std::max(0.001,time.deltaPixelsToSeconds(body.getWidth()));
         horizontal.setRangeLimits(0,std::max(durationSeconds,time.startSeconds+span),juce::dontSendNotification);
         horizontal.setCurrentRange(time.startSeconds,span,juce::dontSendNotification);
-        const auto& show=controller.view().chrome;
-        if(isShowing()&&readMeter&&(show.inputMeters||show.outputMeters)) {
-            if(!isTimerRunning())startTimerHz(30);
-        } else stopTimer();
+        updateTimerSchedule();
         repaint();
     }
     void resized()override
@@ -245,15 +251,24 @@ public:
         if(key==juce::KeyPress::escapeKey&&controller.resizing()){controller.endResize(false);refresh();return true;}
         return false;
     }
-    void visibilityChanged()override{if(!isShowing())stopTimer();else refresh();}
+    void visibilityChanged()override
+    {
+        if(!isShowing()){
+            stopTimer();pendingIdentity.clear();identityDue.reset();
+            cache.forEach([](const Id&,LaneRow& row,bool){row.resetIdentityInteraction();});
+        }
+        else refresh();
+    }
     void showVisibilityMenu(juce::Component& anchor)
     {
         juce::PopupMenu menu;const auto& s=controller.view().chrome;
-        menu.addSectionHeader("Controlli lane");
-        const std::array<const char*,9> names{"Eventi precedenti / successivi","Mute","Solo","Monitoring","Apri Tensor","Meter ingresso","Meter uscita","Pallino del tipo nella card","Indicatore resize"};
+        menu.addSectionHeader("Navigazione");
+        menu.addItem(10,"Frecce nella card",true,controller.view().identityNavigation);
+        menu.addSectionHeader("Controlli laterali opzionali (API conservate)");
+        const std::array<const char*,9> names{"Navigazione laterale (legacy)","Mute","Solo","Monitoring","Apri Tensor","Meter ingresso","Meter uscita","Pallino del tipo nella card","Indicatore resize"};
         const std::array<bool,9> values{s.navigation,s.mute,s.solo,s.monitoring,s.open,s.inputMeters,s.outputMeters,s.typeColour,s.resizeIndicator};
         for(std::size_t i=0;i<names.size();++i)menu.addItem(static_cast<int>(i)+1,names[i],true,values[i]);
-        menu.addSeparator();menu.addSectionHeader("Identita (si nasconde solo sopra le clip)");
+        menu.addSeparator();menu.addSectionHeader("Identita (500 ms sopra contenuti editabili)");
         menu.addItem(20,"Nome a sinistra",true,s.nameSide==presentation::TimelineNameSide::left);
         menu.addItem(21,"Nome a destra",true,s.nameSide==presentation::TimelineNameSide::right);
         menu.addSectionHeader("Accento sempre visibile");
@@ -264,6 +279,7 @@ public:
         const auto currentSession=session;juce::Component::SafePointer<TimelinePanel> safe(this);
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&anchor),[safe,currentSession](int id){
             if(!safe||!id||safe->session!=currentSession)return;
+            if(id==10){safe->controller.setIdentityNavigation(!safe->controller.view().identityNavigation);safe->refresh();return;}
             auto c=safe->controller.view().chrome;
             std::array<bool*,9> flags{&c.navigation,&c.mute,&c.solo,&c.monitoring,&c.open,&c.inputMeters,&c.outputMeters,&c.typeColour,&c.resizeIndicator};
             if(id>=1&&id<=9)*flags[static_cast<std::size_t>(id-1)]=!*flags[static_cast<std::size_t>(id-1)];
@@ -277,6 +293,17 @@ public:
 private:
     class LaneRow final:public juce::Component
     {
+        class IdentitySurface final:public juce::Component
+        {
+        public:
+            explicit IdentitySurface(LaneRow& row):owner(row){setInterceptsMouseClicks(false,true);}
+            void paint(juce::Graphics& g)override
+            {
+                g.addTransform(juce::AffineTransform::translation(-static_cast<float>(getX()),-static_cast<float>(getY())));
+                owner.paintIdentity(g);
+            }
+        private:LaneRow& owner;
+        };
         /** Observation only: the canvas keeps JUCE's real mouse target,
             capture, double-click sequence and cursor. No forwarding proxy. */
         class PointerObserver final : public juce::MouseListener
@@ -286,15 +313,18 @@ private:
             void mouseEnter(const juce::MouseEvent& e) override { observe(e); }
             void mouseMove(const juce::MouseEvent& e) override { observe(e); }
             void mouseExit(const juce::MouseEvent& e) override { observe(e); }
-            void mouseDown(const juce::MouseEvent& e) override { changed(e); }
-            void mouseDrag(const juce::MouseEvent& e) override { changed(e); }
-            void mouseUp(const juce::MouseEvent& e) override { changed(e); }
-            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e); }
+            void mouseDown(const juce::MouseEvent& e) override { changed(e,true); }
+            void mouseDrag(const juce::MouseEvent& e) override { changed(e,true); }
+            void mouseUp(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled(); }
+            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled(); }
             void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails&) override { changed(e); }
         private:
             LaneRow& owner;
             void observe(const juce::MouseEvent& e) { owner.updateIdentityPointer(e.getEventRelativeTo(&owner).position); }
-            void changed(const juce::MouseEvent& e) { owner.underlayDirty=true; observe(e); }
+            void changed(const juce::MouseEvent& e,bool editing=false) {
+                owner.underlayDirty=true;
+                owner.updateIdentityPointer(e.getEventRelativeTo(&owner).position,editing);
+            }
         };
         class ResizeInput final:public juce::Component
         {
@@ -307,12 +337,21 @@ private:
         private:LaneRow& owner;
         };
     public:
-        explicit LaneRow(TimelinePanel& p):host(p),pointerObserver(*this),resizeInput(*this)
-        {setWantsKeyboardFocus(true);addMouseListener(&pointerObserver,true);addAndMakeVisible(resizeInput);}
-        ~LaneRow()override {removeMouseListener(&pointerObserver);if(canvas.saveState)canvas.saveState();}
+        explicit LaneRow(TimelinePanel& p):host(p),pointerObserver(*this),resizeInput(*this),identitySurface(*this)
+        {setWantsKeyboardFocus(true);addMouseListener(&pointerObserver,true);addAndMakeVisible(resizeInput);addAndMakeVisible(identitySurface);}
+        ~LaneRow()override {host.scheduleIdentity(row.key,{});removeMouseListener(&pointerObserver);if(canvas.saveState)canvas.saveState();}
         juce::Rectangle<int> identityBounds() const { return identityLayout.backdrop; }
         bool identitySuppressed() const { return identityHover.hidden(); }
-        void contentPixelsChanged() { underlayDirty=true;sampleIdentityPointer();repaint(identityLayout.backdrop); }
+        TimelineIdentityContent identityReadout() const { return identityContent; }
+        void contentPixelsChanged() { underlayDirty=true;updateNavigationEnabled();sampleIdentityPointer();repaint(identityLayout.backdrop); }
+        void pollIdentityPointer(){sampleIdentityPointer();}
+        void resetIdentityInteraction(){
+            identityHover.reset();identitySurface.setVisible(true);
+            host.scheduleIdentity(row.key,{});underlayDirty=true;
+        }
+        void updateNavigationEnabled(){
+            for(std::size_t i=0;i<navigation.size();++i)if(navigation[i])navigation[i]->setEnabled(adjacentTime(i==1).has_value());
+        }
         Row row;
         void initialise()
         {
@@ -324,6 +363,14 @@ private:
                 if(!buttons[i])throw std::runtime_error("Missing lane control artwork");
                 buttons[i]->setComponentID("button:"+juce::String(static_cast<int>(i))+":"+text(row.lane));
                 addAndMakeVisible(*buttons[i]);buttons[i]->onClick=[this,i]{action(static_cast<LaneButton>(i));};
+            }
+            for(std::size_t i=0;i<navigation.size();++i){
+                navigation[i]=host.painter.makeButton(i==0?LaneButton::previous:LaneButton::next);
+                if(!navigation[i])throw std::runtime_error("Missing identity navigation artwork");
+                navigation[i]->setComponentID("card-nav:"+juce::String(i==0?"previous:":"next:")+text(row.lane));
+                navigation[i]->setTooltip(i==0?"Evento precedente nella lane":"Evento successivo nella lane");
+                identitySurface.addAndMakeVisible(*navigation[i]);
+                navigation[i]->onClick=[this,i]{action(i==0?LaneButton::previous:LaneButton::next);};
             }
             const std::array<const char*,6> tips{"Evento precedente nella lane","Evento successivo nella lane","Mute della traccia (tutte le sue lane)","Solo della traccia (tutte le sue lane)","Apri il Tensor della traccia","Monitoring condiviso della traccia"};
             for(std::size_t i=0;i<buttons.size();++i)buttons[i]->setTooltip(tips[i]);
@@ -345,7 +392,7 @@ private:
             for(std::size_t i=0;i<buttons.size();++i){buttons[i]->setBounds(rectangle(geometry.buttons[i]));buttons[i]->setVisible(!geometry.buttons[i].empty());}
             buttons[2]->setToggleState(owner->muted,juce::dontSendNotification);
             buttons[3]->setToggleState(owner->soloed,juce::dontSendNotification);
-            buttons[5]->setToggleState(owner->monitoring!=Monitoring::automatic,juce::dontSendNotification);
+            buttons[5]->setToggleState(owner->status.monitoringActive,juce::dontSendNotification);
             TimelineIdentityContent nextIdentity;
             const bool isGlobal=owner->role==OwnerRole::global;
             nextIdentity.track=lane&&isGlobal?text(lane->name):text(owner->name);
@@ -358,8 +405,11 @@ private:
                 ancestor=host.controller.owner(ancestor->parent);
             }
             nextIdentity.ownerColour=juce::Colour(owner->colour);
-            nextIdentity.typeColour=lane&&host.style.streamColour?host.style.streamColour(lane->stream):host.style.foreground;
+            nextIdentity.typeColour=isGlobal?juce::Colour(owner->colour):(lane&&host.style.streamColour?host.style.streamColour(lane->stream):host.style.foreground);
             nextIdentity.compact=isGlobal;
+            nextIdentity.navigation=lane&&lane->navigation&&host.controller.view().identityNavigation;
+            nextIdentity.muted=owner->muted;nextIdentity.soloed=owner->soloed;
+            nextIdentity.status=owner->status;
             nextIdentity.onLeft=host.controller.view().chrome.nameSide==presentation::TimelineNameSide::left;
             nextIdentity.selected=host.controller.view().selectedLanes.contains(row.lane);
             nextIdentity.showType=host.controller.view().chrome.typeColour;
@@ -369,6 +419,13 @@ private:
                 identityLayout=TimelineIdentityLayout::make(contentBounds,identityContent,host.style.identityTypography);
                 identityBackdrop=host.painter.prepareIdentity(identityContent,identityLayout);
                 underlayDirty=true;
+            }
+            identitySurface.setBounds(identityLayout.backdrop);
+            identitySurface.toFront(false);
+            const std::array<juce::Rectangle<int>,2> navRects{identityLayout.previous,identityLayout.next};
+            for(std::size_t i=0;i<navRects.size();++i){
+                navigation[i]->setBounds(navRects[i].translated(-identityLayout.backdrop.getX(),-identityLayout.backdrop.getY()));
+                navigation[i]->setVisible(!navRects[i].isEmpty());
             }
             resizeInput.toFront(false);
             resizeInput.setBounds(rectangle(geometry.resizeHit));resizeInput.setVisible(!geometry.resizeHit.empty());resizeInput.toFront(false);
@@ -381,12 +438,13 @@ private:
             }
             if(lane&&lane->heightPolicy==HeightPolicy::automatic&&canvas.preferredHeight)
                 if(host.controller.setAutoHeight(lane->id,canvas.preferredHeight(geometry.content.width)))host.triggerAsyncUpdate();
+            updateNavigationEnabled();
             sampleIdentityPointer(); // includes stationary-pointer scroll / zoom
             repaint();
         }
         void visibilityChanged() override
         {
-            if(!isVisible())identityHover.reset();
+            if(!isVisible()){identityHover.reset();host.scheduleIdentity(row.key,{});}
             underlayDirty=true;
         }
         void paint(juce::Graphics& g)override
@@ -403,11 +461,7 @@ private:
         void paintOverChildren(juce::Graphics& g)override
         {
             const auto* owner=host.controller.owner(row.owner);if(!owner)return;
-            if(!identityHover.hidden()) {
-                prepareUnderlayIfNeeded(g);
-                host.painter.drawIdentityUnderlay(g,identityLayout,identityUnderlay,underlayBounds);
-                host.painter.drawIdentity(g,identityContent,identityLayout,identityBackdrop);
-            }
+
             if(!geometry.resizeGlyph.empty()){
                 const auto r=rectangle(geometry.resizeGlyph);g.setColour(host.style.foreground.withAlpha(0.75f));
                 g.drawHorizontalLine(r.getY(),static_cast<float>(r.getX()),static_cast<float>(r.getRight()));
@@ -456,13 +510,14 @@ private:
             }
         }
         void mouseDoubleClick(const juce::MouseEvent& e)override
-        {if(geometry.resizeHit.contains(e.x,e.y)){if(const auto* lane=host.controller.lane(row.lane))host.controller.setHeight(row.lane,lane->initialHeight);host.refresh();}}
+        {if(geometry.resizeHit.contains(e.x,e.y)){if(const auto* lane=host.controller.lane(row.lane);lane&&lane->visual!=VisualKind::continuous)host.controller.setHeight(row.lane,lane->initialHeight);host.refresh();}}
         bool keyPressed(const juce::KeyPress& key)override
         {if(key==juce::KeyPress::escapeKey&&resizing){resizing=false;host.controller.endResize(false);host.refresh();return true;}return false;}
     private:
         TimelinePanel& host;LaneCanvas canvas;ChromeGeometry geometry;std::optional<VisualKind> createdVisual;
         std::array<std::unique_ptr<juce::Button>,6> buttons;
-        PointerObserver pointerObserver;ResizeInput resizeInput;
+        PointerObserver pointerObserver;ResizeInput resizeInput;IdentitySurface identitySurface;
+        std::array<std::unique_ptr<juce::Button>,2> navigation;
         TimelineIdentityContent identityContent; TimelineIdentityLayout identityLayout;
         juce::Image identityBackdrop; juce::Rectangle<int> identityArea;
         std::uint64_t identityEpoch=0; bool identityReady=false;
@@ -481,24 +536,37 @@ private:
                 host.painter.drawMeter(g,r,v);
             }
         }
-        void updateIdentityPointer(juce::Point<float> p)
+        void updateIdentityPointer(juce::Point<float> p,bool editing=false)
         {
             const auto inBody=host.body.getLocalPoint(this,p);
             const bool inside=isShowing()&&host.body.getLocalBounds().toFloat().contains(inBody)
                 &&identityLayout.backdrop.toFloat().contains(p);
-            bool clip=false;
-            if(inside&&!identityHover.hidden()&&canvas.component&&canvas.containsClipAt) {
+            const bool onNavigation=inside&&!identityHover.hidden()
+                &&(identityLayout.navigationGroup.toFloat().contains(p)
+                   ||(navigation[0]&&navigation[0]->isDown())||(navigation[1]&&navigation[1]->isDown()));
+            bool editable=false;
+            if(inside&&!onNavigation&&!identityHover.hidden()&&canvas.component) {
                 const auto local=canvas.component->getLocalPoint(this,p);
                 auto* target=getComponentAt(p.roundToInt());
-                // An overlaid resize affordance/control is not the canvas.
-                if(target&&(target==canvas.component.get()||canvas.component->isParentOf(target)))
-                    clip=canvas.containsClipAt(local);
+                if(target&&(target==canvas.component.get()||canvas.component->isParentOf(target))) {
+                    if(canvas.containsEditableAt)editable=canvas.containsEditableAt(local);
+                    else if(canvas.containsClipAt)editable=canvas.containsClipAt(local);
+                }
             }
-            if(identityHover.update(inside,clip)) {
-                underlayDirty=true;
-                repaint(identityLayout.backdrop);
+            if(identityHover.update(inside,editable,onNavigation,juce::Time::getMillisecondCounterHiRes(),editing)) {
+                underlayDirty=true;repaint(identityLayout.backdrop);
             }
+            identitySurface.setVisible(!identityHover.hidden());
+            host.scheduleIdentity(row.key,identityHover.deadline());
         }
+        void paintIdentity(juce::Graphics& g)
+        {
+            if(identityHover.hidden())return;
+            prepareUnderlayIfNeeded(g);
+            host.painter.drawIdentityUnderlay(g,identityLayout,identityUnderlay,underlayBounds);
+            host.painter.drawIdentity(g,identityContent,identityLayout,identityBackdrop);
+        }
+
         void sampleIdentityPointer()
         {
             const auto screen=juce::Desktop::getInstance().getMainMouseSource().getScreenPosition();
@@ -518,16 +586,25 @@ private:
             identityUnderlay=host.painter.prepareIdentityUnderlay(pixels,scale,identityLayout,underlayBounds);
             underlayDirty=false;underlayScale=scale;
         }
+        std::optional<double> adjacentTime(bool forward)const
+        {
+            if(canvas.eventTimes){
+                auto times=canvas.eventTimes();
+                std::erase_if(times,[](double t){return !std::isfinite(t)||t<0;});
+                std::sort(times.begin(),times.end());
+                if(forward){for(double t:times)if(t>host.playhead+1e-7)return t;}
+                else{for(auto i=times.rbegin();i!=times.rend();++i)if(*i<host.playhead-1e-7)return *i;}
+                return {};
+            }
+            if(!canvas.supportsDocumentEvents)return {};
+            return host.controller.adjacentEvent(row.lane,host.playhead,forward);
+        }
         void action(LaneButton action)
         {
             const auto* owner=host.controller.owner(row.owner);if(!owner)return;
             if(action==LaneButton::previous||action==LaneButton::next){
                 const bool forward=action==LaneButton::next;
-                auto target=host.controller.adjacentEvent(row.lane,host.playhead,forward);
-                if(canvas.eventTimes){auto times=canvas.eventTimes();std::sort(times.begin(),times.end());target.reset();
-                    if(forward){for(double t:times)if(t>host.playhead+1e-7){target=t;break;}}
-                    else{for(auto i=times.rbegin();i!=times.rend();++i)if(*i<host.playhead-1e-7){target=*i;break;}}
-                }
+                const auto target=adjacentTime(forward);
                 if(target)host.seek(*target);return;
             }
             if(action==LaneButton::mute)host.report(host.controller.control(row.lane,CommandKind::mute,!owner->muted));
@@ -557,7 +634,50 @@ private:
     void scrollBarMoved(juce::ScrollBar* bar,double start)override
     {if(bar==&horizontal)time.startSeconds=std::max(0.0,start);else scrollY=static_cast<std::int64_t>(start);refresh();}
     void handleAsyncUpdate()override{refresh();}
-    void timerCallback()override{cache.forEach([](const Id&,LaneRow& row,bool visible){if(visible)row.updateMeters();});}
+    // One panel timer serves BOTH a single pointer candidate and optional meters.
+    // At rest with meters hidden it is stopped. No O(number-of-lanes) polling.
+    Id pendingIdentity;
+    std::optional<double> identityDue;
+    double timerWakeAt=0,nextMeterAt=0;
+    bool shuttingDown=false;
+    bool metersWanted()const {
+        const auto& c=controller.view().chrome;
+        return isShowing()&&readMeter&&(c.inputMeters||c.outputMeters);
+    }
+    void scheduleIdentity(const Id& id,std::optional<double> due) {
+        if(shuttingDown)return;
+        if(due){pendingIdentity=id;identityDue=due;}
+        else if(pendingIdentity==id){pendingIdentity.clear();identityDue.reset();}
+        updateTimerSchedule();
+    }
+    void updateTimerSchedule() {
+        if(shuttingDown||!isShowing()){stopTimer();timerWakeAt=0;return;}
+        const double now=juce::Time::getMillisecondCounterHiRes();
+        std::optional<double> wake=identityDue;
+        if(metersWanted()) {
+            if(nextMeterAt==0)nextMeterAt=now+1000.0/30.0;
+            if(!wake||nextMeterAt<*wake)wake=nextMeterAt;
+        }else nextMeterAt=0;
+        if(!wake){stopTimer();timerWakeAt=0;return;}
+        if(!isTimerRunning()||std::abs(timerWakeAt-*wake)>0.5) {
+            timerWakeAt=*wake;
+            startTimer(std::max(1,static_cast<int>(std::ceil(*wake-now))));
+        }
+    }
+    void timerCallback()override {
+        stopTimer();timerWakeAt=0;
+        const double now=juce::Time::getMillisecondCounterHiRes();
+        const bool meterTick=metersWanted()&&now>=nextMeterAt;
+        if(identityDue&&now>=*identityDue) {
+            const auto key=pendingIdentity;pendingIdentity.clear();identityDue.reset();
+            if(auto* row=cache.find(key))row->pollIdentityPointer();
+        }
+        if(meterTick) {
+            cache.forEach([](const Id&,LaneRow& row,bool visible){if(visible)row.updateMeters();});
+            nextMeterAt=now+1000.0/30.0;
+        }
+        updateTimerSchedule();
+    }
     void dragTo(juce::Point<float> p)
     {
         if(p.y<20)scrollY=std::max<std::int64_t>(0,scrollY-20);else if(p.y>body.getHeight()-20)scrollY+=20;

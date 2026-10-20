@@ -46,9 +46,14 @@ template<class Canvas>
 panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent& legacy,
                                   PanelCanvasStates& states,const panel::Lane& sourceLane)
 {
+    static_assert(requires(const Canvas& c){c.containsPanelEditableAt(juce::Point<float>{});}
+               ||requires(const Canvas& c){c.containsPanelClipAt(juce::Point<float>{});},
+                  "Every canvas must expose its real editable-content hit geometry");
     auto* raw=component.get();const auto key=std::make_pair(sourceLane.id,sourceLane.visual);
     if(const auto it=states.find(key);it!=states.end())raw->restorePanelState(it->second);
     panel::LaneCanvas result;
+    if constexpr(requires {raw->containsPanelEditableAt(juce::Point<float>{});})
+        result.containsEditableAt=[raw](juce::Point<float> point){return raw->containsPanelEditableAt(point);};
     if constexpr(requires {raw->containsPanelClipAt(juce::Point<float>{});})
         result.containsClipAt=[raw](juce::Point<float> point){return raw->containsPanelClipAt(point);};
     result.saveState=[raw,&states,key]{states[key]=raw->capturePanelState();};
@@ -181,7 +186,7 @@ private:
     std::vector<panel::EventRef> selectedEvents;
     std::map<std::string,int> previousLegacyHeights;
     bool dark=true,warpOn=true,gainOn=true;unsigned groupSequence=0;
-    std::string message="Accento: selezione/riordino. Bordo inferiore: resize. Identita non editabile: si nasconde sopra le clip al passaggio del mouse. Meter sintetici opzionali.";
+    std::string message="Accento: selezione/riordino. Bordo inferiore: resize. Identita e stati non editabili; frecce nella card. Scomparsa dopo 500 ms sopra clip, curve ed eventi. Meter sintetici opzionali.";
     template<class F>void addButton(juce::TextButton& b,F f){b.onClick=std::move(f);addAndMakeVisible(b);}
     static bool localPreview(const panel::Lane& lane)
     {return lane.visual==panel::VisualKind::point || lane.visual==panel::VisualKind::span || lane.visual==panel::VisualKind::continuous;}
