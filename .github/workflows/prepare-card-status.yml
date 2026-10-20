@@ -1,0 +1,71 @@
+name: Prepare verified card status source
+on:
+  push:
+    branches: ['work/card-status-transfer-20261020']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct the exact tested source tree on a ready branch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          BASE = '370459b0629d66857f282efafc2a97a4f15f1ce0'
+          TREE = '67a33acbe9c225f2d28ecc4bace36cf33c5f34d9'
+          DIGEST = 'f498b0765e0d29a9e54e8133d991dfa48c952f5f60a7fe508f1c9fd35e4ea35f'
+          READY = 'work/card-status-ready-20261020'
+          def git(*args, **kwargs):
+              return subprocess.check_output(['git', *args], **kwargs)
+          def blob(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+          encoded = ''.join(pathlib.Path(f'.publication/card-status-{i}.b64').read_text() for i in range(3))
+          raw = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert len(raw) == 63430 and hashlib.sha256(raw).hexdigest() == DIGEST
+          manifest = json.loads(raw)
+          assert manifest['base'] == BASE and manifest['tree'] == TREE and len(manifest['files']) == 26
+          assert git('ls-remote', 'origin', 'refs/heads/main').decode().split()[0] == BASE, 'Main changed; rebase rather than overwrite'
+          git('checkout', '--detach', BASE)
+          seen = set()
+          allowed = {'app', 'demo', 'docs', 'modules', 'tests', 'tools', 'verification', 'README.md'}
+          for item in manifest['files']:
+              path = pathlib.PurePosixPath(item['p'])
+              assert not path.is_absolute() and '..' not in path.parts and '.git' not in path.parts and path.parts[0] in allowed
+              assert str(path) not in seen and item['m'] in ('100644', '100755')
+              seen.add(str(path))
+              previous = subprocess.run(['git', 'show', BASE + ':' + str(path)], capture_output=True)
+              old = previous.stdout if previous.returncode == 0 else b''
+              if item['b'] is None:
+                  assert previous.returncode != 0
+              else:
+                  assert previous.returncode == 0 and blob(old) == item['b']
+              data = old.decode('utf-8').splitlines(keepends=True)
+              previous_start = len(data) + 1
+              for start, end, replacement in reversed(item['e']):
+                  assert 0 <= start <= end <= len(data) and end < previous_start
+                  previous_start = start
+                  data[start:end] = replacement.splitlines(keepends=True)
+              result = ''.join(data).encode('utf-8')
+              assert blob(result) == item['n'], str(path)
+              destination = pathlib.Path(path)
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              assert not destination.is_symlink()
+              destination.write_bytes(result)
+              destination.chmod(int(item['m'], 8) & 0o777)
+              git('add', '-f', '--', str(path))
+          actual = git('write-tree').decode().strip()
+          assert actual == TREE, actual
+          git('config', 'user.name', 'Ayra Soft')
+          git('config', 'user.email', '131635008+AyraSoft@users.noreply.github.com')
+          commit = git('commit-tree', actual, '-p', BASE, '-m', 'Prepare tested passive track states and card navigation').decode().strip()
+          git('push', 'origin', commit + ':refs/heads/' + READY)
+          print('VERIFIED_TREE=' + actual)
+          print('READY_COMMIT=' + commit)
+          print('Main publication is a separate reviewed connector action.')
+          PY
