@@ -1,6 +1,7 @@
 #include "ayra_ui.h"
 #include "SharedChromeLookAndFeel.h"
 #include "../../demo/TimelineIdentityArtwork.h"
+#include "../../demo/TimelineLaneControls.h"
 #include <cstdlib>
 #include <iostream>
 #include <array>
@@ -8,125 +9,166 @@ using namespace ayra::timeline_panel;
 using ayra::lab::TimelineIdentityArtwork;
 namespace
 {
-int checks = 0;
-#define CHECK(x) do {++checks; if(!(x)) {std::cerr << "FAIL " << __LINE__ << ": " << #x << '\n'; std::exit(1);}} while(false)
-void writePng(const juce::File& file, const juce::Image& image)
+int checks=0;
+#define CHECK(x) do {++checks; if(!(x)){std::cerr<<"FAIL "<<__LINE__<<": "<<#x<<'\n';std::exit(1);}}while(false)
+void writePng(const juce::File& file,const juce::Image& image)
 {
-    file.deleteFile(); juce::FileOutputStream output(file);
-    CHECK(output.openedOk()); CHECK(juce::PNGImageFormat{}.writeImageToStream(image,output));
+    file.deleteFile();juce::FileOutputStream output(file);CHECK(output.openedOk());
+    CHECK(juce::PNGImageFormat{}.writeImageToStream(image,output));
 }
-void background(juce::Graphics& g, juce::Rectangle<int> bounds, juce::Colour colour, int kind)
+void lane(juce::Graphics& g,juce::Rectangle<int> bounds,bool dark,juce::Colour colour,int kind)
 {
-    // An explicit graphics fixture, NOT a waveform decoded from audio.
-    g.setColour(ayra::tokens::surfaceRecessed()); g.fillRect(bounds);
-    g.setColour(ayra::tokens::borderHairline().withAlpha(0.35f));
-    for(int x=bounds.getX();x<bounds.getRight();x+=36)g.drawVerticalLine(x,static_cast<float>(bounds.getY()),static_cast<float>(bounds.getBottom()));
-    auto body=bounds.reduced(24,18).toFloat();
-    g.setColour(colour.withAlpha(0.72f));g.fillRoundedRectangle(body,3);
-    g.setColour(juce::Colours::black.withAlpha(0.32f));
+    g.setColour(dark?juce::Colour(0xff101520):juce::Colour(0xffdde4ef));g.fillRoundedRectangle(bounds.toFloat(),6);
+    juce::ColourGradient aura(colour.withAlpha(0.28f),{bounds.getX()+75.0f,bounds.getY()+32.0f},
+                              colour.withAlpha(0.0f),{bounds.getX()+165.0f,bounds.getY()+32.0f},true);
+    g.setGradientFill(aura);g.fillRoundedRectangle(bounds.toFloat(),6);
+    if(kind<0)return;
+    const auto b=bounds.reduced(28,8).toFloat();
+    g.setColour(colour.withAlpha(0.34f));g.fillRoundedRectangle(b,4);
+    g.setColour(colour.withAlpha(0.75f));
     if(kind==0){
-        juce::Path wave;
-        for(int x=0;x<static_cast<int>(body.getWidth());++x){
-            float size=5.0f+14.0f*std::abs(std::sin(x*0.061f)*std::sin(x*0.017f));
-            wave.startNewSubPath(body.getX()+x,body.getCentreY()-size);
-            wave.lineTo(body.getX()+x,body.getCentreY()+size);
-        }
-        g.strokePath(wave,juce::PathStrokeType(1.0f));
+        for(int x=0;x<b.getWidth();++x){const float h=3+16*std::abs(std::sin(x*0.071f)*std::sin(x*0.023f));
+            g.drawVerticalLine(juce::roundToInt(b.getX()+x),b.getCentreY()-h,b.getCentreY()+h);}
     }else{
-        for(int i=0;i<32;++i)g.fillRoundedRectangle(body.getX()+i*15.0f,body.getY()+12+(i*19)%juce::jmax(1,static_cast<int>(body.getHeight()-25)),13,3,1);
+        for(int i=0;i<48;++i)g.fillRoundedRectangle(b.getX()+i*14,b.getY()+5+(i*11)%35,11,3,1);
     }
 }
-void oldName(juce::Graphics& g, juce::Rectangle<int> row, juce::Colour owner, juce::String title)
+juce::Image showcase(bool dark,float scale,bool left)
 {
-    const auto area=row.removeFromRight(240).toFloat();
-    const auto shade=ayra::tokens::surfaceBase().interpolatedWith(owner,0.20f);
-    juce::ColourGradient gradient(shade.withAlpha(0.97f),area.getRight(),0,shade.withAlpha(0.0f),area.getX(),0,false);
-    gradient.addColour(0.55,shade.withAlpha(0.80f));g.setGradientFill(gradient);g.fillRect(area);
-    g.setColour(ayra::tokens::textPrimary());g.setFont(juce::Font(juce::FontOptions().withHeight(14).withStyle("Bold")));
-    g.drawText(title,area.toNearestInt().reduced(12,0),juce::Justification::centredRight,true);
-}
-juce::Image comparison(bool dark, float scale, bool left=false)
-{
-    namespace tk=ayra::tokens;
-    tk::setThemeMode(dark?tk::Mode::Dark:tk::Mode::Light);
-    juce::Image image(juce::Image::ARGB,juce::roundToInt(1160*scale),juce::roundToInt(584*scale),true);
-    juce::Graphics g(image);g.addTransform(juce::AffineTransform::scale(scale));g.fillAll(tk::surfaceBase());
-    g.setFont(tk::type::title());g.setColour(tk::textPrimary());g.drawText("Identita' della lane",20,12,1000,26,juce::Justification::centredLeft);
-    g.setFont(tk::type::caption());g.setColour(tk::textSecondary());
-    g.drawText("Confronto nativo JUCE del painter  /  fixture grafica, non playback",20,40,1000,20,juce::Justification::centredLeft);
-    g.drawText("PRIMA  /  gradiente a tutta altezza",20,72,540,20,juce::Justification::centredLeft);
-    g.drawText("DOPO  /  identita' flottante",600,72,540,20,juce::Justification::centredLeft);
-    const std::array<juce::String,3> primary {"Voice", "Keys", "Voce principale / armonizzazioni"};
-    const std::array<juce::String,3> secondary {"Audio I", "MIDI I", "Audio II"};
-    const std::array<juce::Colour,3> owners {juce::Colour(0xff39b9b6),juce::Colour(0xffdfae68),juce::Colour(0xff39b9b6)};
-    for(int i=0;i<3;++i){
-        const auto type=i==1?tk::nodeColour(tk::StreamType::midi):tk::nodeColour(tk::StreamType::audio);
-        const juce::Rectangle<int> before(20,100+i*136,540,128),after(600,100+i*136,540,128);
-        background(g,before,type,i%2);background(g,after,type,i%2);
-        oldName(g,before,owners[i],primary[i]+" / "+secondary[i]);
-        TimelineIdentityContent c{primary[i],secondary[i],owners[i],type,false,left,false,true};
-        const auto layout=TimelineIdentityLayout::make(after,c,TimelineIdentityArtwork::typography());
+    ayra::tokens::setThemeMode(dark?ayra::tokens::Mode::Dark:ayra::tokens::Mode::Light);
+    constexpr int width=960,height=414;
+    juce::Image image(juce::Image::ARGB,juce::roundToInt(width*scale),juce::roundToInt(height*scale),true);
+    juce::Graphics g(image);g.addTransform(juce::AffineTransform::scale(scale));
+    g.fillAll(dark?juce::Colour(0xff090c12):juce::Colour(0xfff4f6fa));
+    g.setColour(dark?juce::Colour(0xfff1f5f9):juce::Colour(0xff182033));
+    g.setFont(juce::Font(juce::FontOptions().withHeight(17).withStyle("Bold")));
+    g.drawText("Frosted lens / riferimento HTML",18,12,900,25,juce::Justification::centredLeft);
+    const std::array<juce::String,4> performers{"Ayra","Ayra","Noah","Performer with an intentionally very long name"};
+    const std::array<juce::String,4> tracks{juce::String::fromUTF8("Rhythm Guitars \xe2\x80\x94 Left Quad"),"Lead Vocals","Keys","Very long track label that must not increase the lens width"};
+    const std::array<juce::Colour,4> types{juce::Colour(0xff38bdf8),juce::Colour(0xff16c95c),juce::Colour(0xfff03c3c),juce::Colour(0xffa84fd6)};
+    for(int i=0;i<4;++i){
+        const juce::Rectangle<int> bounds(16,48+i*76,928,64);
+        lane(g,bounds,dark,types[i],i==0?-1:i%2);
+        TimelineIdentityContent c; c.performer=performers[i];c.track=tracks[i];
+        c.type=i==2?"MIDI":i==3?"DMX":"Audio";c.typeColour=types[i];c.onLeft=left;
+        const auto layout=TimelineIdentityLayout::make(bounds,c,TimelineIdentityArtwork::typography());
+        // Sample the real fixture underlay before compositing the lens. Explicit
+        // rendering fixture, not decoded media or a screenshot of the whole app.
+        const auto sample=layout.backdrop.expanded(15).getIntersection(bounds);
+        const auto pixels=image.getClippedImage((sample.toFloat() * scale).toNearestInt()).createCopy();
+        const auto blurred=TimelineIdentityArtwork::prepareUnderlay(pixels,scale,layout,sample);
+        TimelineIdentityArtwork::drawUnderlay(g,layout,blurred,sample);
         TimelineIdentityArtwork::draw(g,c,layout,TimelineIdentityArtwork::prepare(c,layout));
     }
-    TimelineIdentityContent compact {"Markers",{},juce::Colour(0xff888888),tk::textSecondary(),true,false,false,false};
-    const juce::Rectangle<int> row(600,516,540,24);background(g,row,tk::surfaceRaised(),1);
-    const auto layout=TimelineIdentityLayout::make(row,compact,TimelineIdentityArtwork::typography());
-    TimelineIdentityArtwork::draw(g,compact,layout,TimelineIdentityArtwork::prepare(compact,layout));
-    g.setFont(tk::type::caption());g.setColour(tk::textSecondary());
-    g.drawText("Stessa area clip. Nessun header aggiunto. Nome della traccia e nome della lane hanno destinazioni di rinomina distinte.",20,552,1120,20,juce::Justification::centredLeft);
+    const juce::Rectangle<int> bounds(16,358,928,24);lane(g,bounds,dark,juce::Colours::grey,-1);
+    TimelineIdentityContent global;global.track="Markers";global.compact=true;global.onLeft=left;
+    const auto layout=TimelineIdentityLayout::make(bounds,global,TimelineIdentityArtwork::typography());
+    TimelineIdentityArtwork::draw(g,global,layout,TimelineIdentityArtwork::prepare(global,layout));
+    g.setColour(dark?juce::Colour(0xff94a3b8):juce::Colour(0xff58677c));g.setFont(juce::Font(juce::FontOptions().withHeight(10)));
+    g.drawText("Fixture JUCE: lens 144-229 px / non editabile / nessun header / palette di tipo indipendente",18,387,900,18,juce::Justification::centredLeft);
     return image;
 }
-juce::Image widgets(bool dark)
+juce::Image groupedShowcase(bool dark, bool namesOnLeft)
 {
-    namespace tk=ayra::tokens;
-    tk::setThemeMode(dark?tk::Mode::Dark:tk::Mode::Light);
-    ayra::lab::SharedChromeLookAndFeel laf;
-    laf.setColour(juce::TextButton::buttonColourId,tk::surfaceRaised());
-    laf.setColour(juce::TextButton::textColourOffId,tk::textPrimary());
-    laf.setColour(juce::TextButton::textColourOnId,tk::textOnTint(tk::accent()));
-    juce::Image image(juce::Image::ARGB,860,190,true);juce::Graphics g(image);
-    g.fillAll(tk::surfaceBase());g.setFont(tk::type::title());g.setColour(tk::textPrimary());
-    g.drawText("Widget / sorgente visuale selezionata",20,12,820,26,juce::Justification::centredLeft);
-    const std::array<const char*,5> names{"Normale","Hover","Premuto","Attivo","Disabilitato"};
-    for(int i=0;i<5;++i){
-        juce::Graphics::ScopedSaveState guard(g);g.setOrigin(20+i*148,64);
-        juce::TextButton button(names[i]);button.setLookAndFeel(&laf);button.setSize(138,36);
-        if(i==3)button.setToggleState(true,juce::dontSendNotification);
-        if(i==4)button.setEnabled(false);
-        laf.drawButtonBackground(g,button,tk::surfaceRaised(),i==1,i==2);
-        laf.drawButtonText(g,button,i==1,i==2);button.setLookAndFeel(nullptr);
+    namespace tl=ayra::timeline;
+    ayra::tokens::setThemeMode(dark?ayra::tokens::Mode::Dark:ayra::tokens::Mode::Light);
+    juce::Image image(juce::Image::ARGB,1100,640,true);juce::Graphics g(image);
+    g.fillAll(ayra::tokens::surfaceRecessed());
+    g.setColour(ayra::tokens::textPrimary());g.setFont(ayra::tokens::type::body().boldened());
+    g.drawText("Card centrata / controlli raggruppati / accento traccia",16,8,1050,24,juce::Justification::centredLeft);
+    const std::array<int,4> heights{64,176,272,56};int top=44;
+    for(int i=0;i<4;++i){
+        juce::Graphics::ScopedSaveState save(g);g.setOrigin(12,top);
+        const juce::Rectangle<int> row(0,0,1076,heights[i]);
+        const juce::Colour owner(0xff5bb6bd);const juce::Colour type(i==2?0xfff03c3c:0xff16c95c);
+        lane(g,row,dark,type,i==2?1:0);
+        tl::TimelineChromeVisibility show;show.nameSide=namesOnLeft?tl::TimelineNameSide::left:tl::TimelineNameSide::right;
+        tl::TimelineChromeCapabilities caps;
+        const auto geometry=tl::layoutTimelineLaneChrome(row.getWidth(),row.getHeight(),caps,show);
+        // Real common well and real glyph-only children, not a mock renderer.
+        g.setColour(owner);g.fillRect(rectangle(geometry.leftAccent));
+        for(auto well:{geometry.leftGroup,geometry.rightGroup})
+            if(!well.empty())ayra::lab::TimelineLaneControls::drawGroup(g,rectangle(well).toFloat());
+        for(int b=0;b<6;++b){
+            auto button=ayra::lab::TimelineLaneControls::makeButton(static_cast<tl::TimelineLaneButton>(b));
+            button->setBounds(rectangle(geometry.buttons[static_cast<std::size_t>(b)]));
+            button->setToggleState((i==1&&b==3),juce::dontSendNotification);
+            const auto art=button->createComponentSnapshot(button->getLocalBounds());
+            g.drawImageAt(art,button->getX(),button->getY());
+        }
+        TimelineIdentityContent c;c.performer="Ayra";c.track=i==0?"Backing":i==1?"Voice":i==2?"Keys":"Minimum height";
+        c.type=i==2?"MIDI":"Audio";c.typeColour=type;c.onLeft=namesOnLeft;
+        const auto layout=TimelineIdentityLayout::make(rectangle(geometry.content),c,TimelineIdentityArtwork::typography());
+        auto sample=layout.backdrop.expanded(15).getIntersection(rectangle(geometry.content));
+        const auto pixels=image.getClippedImage(sample.translated(12,top)).createCopy();
+        const auto underlay=TimelineIdentityArtwork::prepareUnderlay(pixels,1,layout,sample);
+        TimelineIdentityArtwork::drawUnderlay(g,layout,underlay,sample);
+        TimelineIdentityArtwork::draw(g,c,layout,TimelineIdentityArtwork::prepare(c,layout));
+        top+=heights[i]+6;
     }
-    for(int i=0;i<5;++i)laf.drawVMeter(g,{775.0f+i*10,55,6,100},0.15f+i*0.18f);
-    g.setFont(tk::type::caption());g.setColour(tk::textSecondary());
-#if AYRA_LAB_VISUALS_FROM_MULTIVERSE
-    g.drawText("Buttons.cpp originale adattato solo nel nome della classe; meter e token inclusi dal checkout.",20,130,735,24,juce::Justification::centredLeft);
-#else
-    g.drawText("Profilo snapshot: questa immagine NON usa ApplicationLookAndFeel di Multiverse.",20,130,735,24,juce::Justification::centredLeft);
-#endif
     return image;
 }
+
 }
 int main(int argc,char** argv)
 {
     juce::ScopedJuceInitialiser_GUI gui;
     const auto output=argc>1?juce::File(juce::String(argv[1])):juce::File::getCurrentWorkingDirectory();
     CHECK(output.createDirectory().wasOk());
+    TimelineIdentityHoverState hover;
+    CHECK(!hover.hidden());CHECK(!hover.update(true,false));
+    CHECK(hover.update(true,true));CHECK(hover.hidden());
+    CHECK(!hover.update(true,false));CHECK(hover.hidden());
+    CHECK(hover.update(false,true));CHECK(!hover.hidden());
+    CHECK(!hover.update(false,false));CHECK(!hover.update(true,false));
+    hover.update(true,true);hover.reset();CHECK(!hover.hidden());
     for(bool dark:{true,false}){
         ayra::tokens::setThemeMode(dark?ayra::tokens::Mode::Dark:ayra::tokens::Mode::Light);
-        for(int width:{0,12,44,120,540,1200})for(int height:{16,24,48,96,400})for(bool left:{false,true}){
-            TimelineIdentityContent c{"A very long owner name that must not be squeezed", "Audio I", juce::Colour(0xff38bdb5), juce::Colour(0xff16c95c),height<48,left,false,true};
-            const juce::Rectangle<int> area(0,0,width,height);
-            auto l=TimelineIdentityLayout::make(area,c,TimelineIdentityArtwork::typography());
-            CHECK(l.backdrop.isEmpty()||area.contains(l.backdrop));CHECK(l.primary.isEmpty()||area.contains(l.primary));
-            CHECK(l.secondary.isEmpty()||area.contains(l.secondary));
-            CHECK(height<96||l.backdrop.getHeight()<height);
-            CHECK(l.primaryFont.getHorizontalScale()==1.0f);
-            auto image=TimelineIdentityArtwork::prepare(c,l);CHECK(l.backdrop.isEmpty()||image.isValid());
+        const auto fonts=TimelineIdentityArtwork::typography();
+        for(int width:{0,12,44,120,240,540,1200})for(int height:{16,24,32,40,48,64,96,400})for(bool left:{false,true}){
+            TimelineIdentityContent c;c.performer="Performer with an intentionally long name";c.track="Track with a very long name";
+            c.type="Audio";c.typeColour=juce::Colour(0xff38bdf8);c.onLeft=left;
+            const juce::Rectangle<int> area(13,17,width,height);
+            const auto l=TimelineIdentityLayout::make(area,c,fonts);
+            for(auto rect:{l.backdrop,l.track,l.performer,l.type,l.typeMark})CHECK(rect.isEmpty()||area.contains(rect));
+            CHECK(l.backdrop.getWidth()<=TimelineIdentityLayout::maxWidth);
+            CHECK(l.backdrop.getHeight()<=TimelineIdentityLayout::normalHeight);
+            CHECK(l.trackFont.getHorizontalScale()==1.0f);
+            CHECK(!l.twoLines||l.performer.isEmpty()||l.type.isEmpty()||!l.performer.intersects(l.type));
+            CHECK(!l.twoLines||l.track.getY()>=l.performer.getBottom());
+            CHECK(l.typeMark.isEmpty()||l.typeMark.getWidth()==5);
+            const auto image=TimelineIdentityArtwork::prepare(c,l);CHECK(l.backdrop.isEmpty()||image.isValid());
+            CHECK(l.backdrop.isEmpty()||std::abs(l.backdrop.getCentreY()-area.getCentreY())<=1);
+            if(l.twoLines&&!l.type.isEmpty())CHECK(l.track.getRight()==l.type.getRight());
+            if(image.isValid())for(int x=0;x<juce::jmin(18,image.getWidth());++x)
+                for(int y=0;y<image.getHeight();++y)CHECK(image.getPixelAt(x,y).getAlpha()==0);
+            if(width>=540&&height>=64){CHECK(l.twoLines);CHECK(std::abs(l.backdrop.getCentreY()-area.getCentreY())<=1);CHECK(l.trackFont.getHeightInPoints()==12.5f);}
         }
-        writePng(output.getChildFile(dark?"widgets-dark.png":"widgets-light.png"),widgets(dark));
-        writePng(output.getChildFile(dark?"identity-left-dark.png":"identity-left-light.png"),comparison(dark,1,true));
-        for(float scale:{1.0f,1.25f,1.5f,2.0f})writePng(output.getChildFile((dark?"identity-dark-":"identity-light-")+juce::String(scale,2)+".png"),comparison(dark,scale));
+        for(bool left:{false,true})for(float scale:{1.0f,1.25f,1.5f,2.0f})
+            writePng(output.getChildFile(juce::String(dark?"lens-dark-":"lens-light-")+(left?"left-":"right-")+juce::String(scale,2)+".png"),showcase(dark,scale,left));
+    }
+    for(bool dark:{true,false})for(bool left:{false,true})
+        writePng(output.getChildFile(juce::String("grouped-")+(dark?"dark-":"light-")+(left?"left":"right")+".png"),groupedShowcase(dark,left));
+    juce::Image stripes(juce::Image::ARGB,80,40,true);
+    {juce::Graphics g(stripes);g.fillAll(juce::Colours::black);g.setColour(juce::Colours::white);
+     for(int x=0;x<80;x+=2)g.fillRect(x,0,1,40);}
+    const auto blur=TimelineIdentityArtwork::blurUnderlay(stripes,1);
+    CHECK(blur.isValid());CHECK(std::abs(blur.getPixelAt(40,20).getFloatRed()-blur.getPixelAt(41,20).getFloatRed())<0.2f);
+    // The blur itself must dissolve too, otherwise its crop reveals left corners.
+    TimelineIdentityContent card;card.track="Backing";card.performer="Ayra";card.type="Audio";
+    const auto layout=TimelineIdentityLayout::make({0,0,320,100},card,TimelineIdentityArtwork::typography());
+    juce::Image flat(juce::Image::ARGB,320,100,true);{juce::Graphics g(flat);g.fillAll(juce::Colours::white);}
+    const auto masked=TimelineIdentityArtwork::prepareUnderlay(flat,1,layout,{0,0,320,100});
+    for(int y=layout.backdrop.getY();y<layout.backdrop.getBottom();++y)
+        for(int x=layout.backdrop.getX();x<layout.backdrop.getX()+9;++x)CHECK(masked.getPixelAt(x,y).getAlpha()==0);
+    CHECK(masked.getPixelAt(layout.backdrop.getRight()-12,layout.backdrop.getCentreY()).getAlpha()>240);
+    // A single open V, never a closed transport triangle/bar.
+    for(bool right:{false,true}) {
+        auto path=ayra::lab::TimelineLaneControls::navigationPath({0,0,22,22},right);
+        juce::Path::Iterator it(path);int moves=0,lines=0;
+        while(it.next()){moves+=it.elementType==juce::Path::Iterator::startNewSubPath;lines+=it.elementType==juce::Path::Iterator::lineTo;CHECK(it.elementType!=juce::Path::Iterator::closePath);}
+        CHECK(moves==1&&lines==2);
     }
     ayra::shadowCache().clear();juce::ImageCache::releaseUnusedImages();
-    std::cout<<"PASS "<<checks<<" identity layout/render assertions; screenshots are native painter fixtures, not full application frames\n";
+    std::cout<<"PASS "<<checks<<" frosted lens layout/render/hover assertions; native JUCE painter fixtures\n";
 }

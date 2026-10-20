@@ -34,13 +34,23 @@ public:
     virtual ~TimelinePanelLookAndFeel()=default;
     virtual std::unique_ptr<juce::Button> makeButton(LaneButton)=0;
     virtual void drawAccent(juce::Graphics&,juce::Rectangle<float>,juce::Colour)const=0;
+    virtual void drawControlGroup(juce::Graphics&,juce::Rectangle<float>)const {}
     virtual void drawMeter(juce::Graphics&,juce::Rectangle<float>,float)const=0;
     virtual juce::Image prepareIdentity(const TimelineIdentityContent&, const TimelineIdentityLayout&) const { return {}; }
+    // Optional real frosted underlay. The panel captures only a padded lens-sized
+    // region of the canvas, never its own overlay, and only after invalidation.
+    virtual int identityBackdropPadding() const noexcept { return 0; }
+    virtual juce::Image prepareIdentityUnderlay(const juce::Image&, float) const { return {}; }
+    virtual juce::Image prepareIdentityUnderlay(const juce::Image& image, float scale,
+                                                const TimelineIdentityLayout&, juce::Rectangle<int>) const
+    { return prepareIdentityUnderlay(image,scale); }
+    virtual void drawIdentityUnderlay(juce::Graphics&, const TimelineIdentityLayout&,
+                                      const juce::Image&, juce::Rectangle<int>) const {}
     virtual void drawIdentity(juce::Graphics& g, const TimelineIdentityContent& c,
                               const TimelineIdentityLayout& layout, const juce::Image&) const
     {
-        g.setColour(juce::Colours::white); g.setFont(layout.primaryFont);
-        g.drawText(c.primary,layout.primary,juce::Justification::centredRight,true);
+        g.setColour(juce::Colours::white); g.setFont(layout.trackFont);
+        g.drawText(c.track,layout.track,juce::Justification::centredRight,true);
     }
 };
 struct CanvasFrame
@@ -63,6 +73,10 @@ struct LaneCanvas
     // Pure content/width measurement, never a function of the current height.
     std::function<int(int width)> preferredHeight;
     bool supportsDocumentEvents=true;
+    // Canvas-local, side-effect-free query using the SAME clip/editor geometry
+    // as input. A component's rectangular hitTest or a lane time interval is
+    // not proof of a clip here. Missing callback = no hover suppression.
+    std::function<bool(juce::Point<float>)> containsClipAt;
 };
 using CanvasFactory=std::function<LaneCanvas(const Lane&)>;
 struct MeterReadback
@@ -120,6 +134,18 @@ public:
     {controller.setLaneVisible(id,true);scrollY=static_cast<std::int64_t>(controller.laneTop(id));refresh();}
     void setChrome(presentation::TimelineChromeVisibility settings)
     {controller.setChrome(settings);refresh();}
+    // Read-only inspection ports, also useful for native accessibility tests.
+    juce::Rectangle<int> getIdentityBounds(const Id& lane) const
+    {
+        if (auto* r=cache.find("lane:"+lane)) return getLocalArea(r,r->identityBounds());
+        return {};
+    }
+    bool isIdentitySuppressed(const Id& lane) const
+    { if (auto* r=cache.find("lane:"+lane)) return r->identitySuppressed(); return false; }
+    // Async waveform/image providers call this when pixels change independently
+    // of a CanvasFrame revision. Presentation invalidation, not a document edit.
+    void notifyCanvasContentChanged(const Id& lane)
+    { if (auto* r=cache.find("lane:"+lane)) r->contentPixelsChanged(); }
     void refresh()
     {
         if(updating)return;
@@ -149,10 +175,7 @@ public:
             int inset=ChromeGeometry::accentWidth;
             for(const auto& lane:snapshot.lanes){
                 const auto* owner=controller.owner(lane.owner);if(!owner)continue;
-                presentation::TimelineChromeCapabilities caps;
-                caps.navigation=lane.navigation;caps.mute=owner->capabilities.mute;caps.solo=owner->capabilities.solo;
-                caps.open=owner->capabilities.open;caps.monitoring=owner->capabilities.monitoring;
-                caps.inputMeterCount=lane.inputMeterCount;caps.outputMeterCount=lane.outputMeterCount;
+                const auto caps=controller.chromeCapabilities(lane);
                 inset=std::max(inset,presentation::layoutTimelineLaneChrome(4096,controller.height(lane.id),caps,controller.view().chrome).leftInset);
             }
             time.originX=inset;originRevision=snapshot.revision;originChrome=controller.view().chrome;
@@ -227,10 +250,10 @@ public:
     {
         juce::PopupMenu menu;const auto& s=controller.view().chrome;
         menu.addSectionHeader("Controlli lane");
-        const std::array<const char*,9> names{"Eventi precedenti / successivi","Mute","Solo","Monitoring","Apri Tensor","Meter ingresso","Meter uscita","Colore tipo","Indicatore resize"};
+        const std::array<const char*,9> names{"Eventi precedenti / successivi","Mute","Solo","Monitoring","Apri Tensor","Meter ingresso","Meter uscita","Pallino del tipo nella card","Indicatore resize"};
         const std::array<bool,9> values{s.navigation,s.mute,s.solo,s.monitoring,s.open,s.inputMeters,s.outputMeters,s.typeColour,s.resizeIndicator};
         for(std::size_t i=0;i<names.size();++i)menu.addItem(static_cast<int>(i)+1,names[i],true,values[i]);
-        menu.addSeparator();menu.addSectionHeader("Nome sempre visibile");
+        menu.addSeparator();menu.addSectionHeader("Identita (si nasconde solo sopra le clip)");
         menu.addItem(20,"Nome a sinistra",true,s.nameSide==presentation::TimelineNameSide::left);
         menu.addItem(21,"Nome a destra",true,s.nameSide==presentation::TimelineNameSide::right);
         menu.addSectionHeader("Accento sempre visibile");
@@ -254,30 +277,24 @@ public:
 private:
     class LaneRow final:public juce::Component
     {
-        /** JUCE hitTest has no click count. This small name-only proxy forwards
-            the first click and every drag/wheel to the underlying live target,
-            but consumes the SECOND down/up and double-click for rename. The
-            gradient itself never intercepts input. */
-        class NameInput final:public juce::Component
+        /** Observation only: the canvas keeps JUCE's real mouse target,
+            capture, double-click sequence and cursor. No forwarding proxy. */
+        class PointerObserver final : public juce::MouseListener
         {
         public:
-            explicit NameInput(LaneRow& row, bool isPrimary=true):owner(row),primary(isPrimary){}
-            void mouseDown(const juce::MouseEvent& e)override {
-                if(e.mods.isLeftButtonDown()&&e.getNumberOfClicks()==2){renameClick=true;target=nullptr;owner.beginRename(primary);return;}
-                renameClick=false;target=findTarget(e);if(target)target->mouseDown(e.getEventRelativeTo(target));
-            }
-            void mouseDrag(const juce::MouseEvent& e)override {if(target&&!renameClick)target->mouseDrag(e.getEventRelativeTo(target));}
-            void mouseUp(const juce::MouseEvent& e)override {if(target&&!renameClick)target->mouseUp(e.getEventRelativeTo(target));target=nullptr;renameClick=false;}
-            void mouseDoubleClick(const juce::MouseEvent&)override {}
-            void mouseMove(const juce::MouseEvent& e)override {if(auto* p=findTarget(e)){p->mouseMove(e.getEventRelativeTo(p));setMouseCursor(p->getMouseCursor());}}
-            void mouseWheelMove(const juce::MouseEvent& e,const juce::MouseWheelDetails& w)override
-            {if(auto* p=findTarget(e))p->mouseWheelMove(e.getEventRelativeTo(p),w);}
+            explicit PointerObserver(LaneRow& row) : owner(row) {}
+            void mouseEnter(const juce::MouseEvent& e) override { observe(e); }
+            void mouseMove(const juce::MouseEvent& e) override { observe(e); }
+            void mouseExit(const juce::MouseEvent& e) override { observe(e); }
+            void mouseDown(const juce::MouseEvent& e) override { changed(e); }
+            void mouseDrag(const juce::MouseEvent& e) override { changed(e); }
+            void mouseUp(const juce::MouseEvent& e) override { changed(e); }
+            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e); }
+            void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails&) override { changed(e); }
         private:
-            juce::Component* findTarget(const juce::MouseEvent& e)const {
-                auto* root=owner.canvas.component.get();if(!root)return nullptr;
-                return root->getComponentAt(root->getLocalPoint(this,e.getPosition()));
-            }
-            LaneRow& owner; bool primary=true; juce::Component::SafePointer<juce::Component> target;bool renameClick=false;
+            LaneRow& owner;
+            void observe(const juce::MouseEvent& e) { owner.updateIdentityPointer(e.getEventRelativeTo(&owner).position); }
+            void changed(const juce::MouseEvent& e) { owner.underlayDirty=true; observe(e); }
         };
         class ResizeInput final:public juce::Component
         {
@@ -290,15 +307,16 @@ private:
         private:LaneRow& owner;
         };
     public:
-        explicit LaneRow(TimelinePanel& p):host(p),nameInput(*this),laneNameInput(*this,false),resizeInput(*this)
-        {setWantsKeyboardFocus(true);addAndMakeVisible(nameInput);addAndMakeVisible(laneNameInput);addChildComponent(nameEditor);addAndMakeVisible(resizeInput);}
-        ~LaneRow()override {nameEditor.onFocusLost=nullptr;nameEditor.onReturnKey=nullptr;if(canvas.saveState)canvas.saveState();}
+        explicit LaneRow(TimelinePanel& p):host(p),pointerObserver(*this),resizeInput(*this)
+        {setWantsKeyboardFocus(true);addMouseListener(&pointerObserver,true);addAndMakeVisible(resizeInput);}
+        ~LaneRow()override {removeMouseListener(&pointerObserver);if(canvas.saveState)canvas.saveState();}
+        juce::Rectangle<int> identityBounds() const { return identityLayout.backdrop; }
+        bool identitySuppressed() const { return identityHover.hidden(); }
+        void contentPixelsChanged() { underlayDirty=true;sampleIdentityPointer();repaint(identityLayout.backdrop); }
         Row row;
         void initialise()
         {
-            setComponentID("lane:"+text(row.lane));nameInput.setComponentID("name:"+text(row.lane));
-            laneNameInput.setComponentID("lane-name:"+text(row.lane));
-            nameEditor.setComponentID("rename:"+text(row.lane));resizeInput.setComponentID("resize:"+text(row.lane));
+            setComponentID("lane:"+text(row.lane));resizeInput.setComponentID("resize:"+text(row.lane));
             if(const auto* lane=host.controller.lane(row.lane)){canvas=host.factory(*lane);createdVisual=lane->visual;}
             if(canvas.component){canvas.component->setComponentID("canvas:"+text(row.lane));addAndMakeVisible(*canvas.component);canvas.component->toBack();}
             for(std::size_t i=0;i<buttons.size();++i){
@@ -309,22 +327,20 @@ private:
             }
             const std::array<const char*,6> tips{"Evento precedente nella lane","Evento successivo nella lane","Mute della traccia (tutte le sue lane)","Solo della traccia (tutte le sue lane)","Apri il Tensor della traccia","Monitoring condiviso della traccia"};
             for(std::size_t i=0;i<buttons.size();++i)buttons[i]->setTooltip(tips[i]);
-            nameEditor.onEscapeKey=[this]{nameEditor.setVisible(false);nameInput.setVisible(true);laneNameInput.setVisible(identityLayout.twoLines);repaint();};
-            nameEditor.onReturnKey=[this]{finishRename();};
-            nameEditor.onFocusLost=[this]{if(nameEditor.isVisible())finishRename();};
         }
         bool matches(const Lane& lane)const{return createdVisual&&*createdVisual==lane.visual;}
         bool interacting()const
-        {return dragging||accentDown||resizing||nameEditor.isVisible()||isMouseButtonDown(true)
+        {return dragging||accentDown||resizing||isMouseButtonDown(true)
             ||(canvas.hasInteraction&&canvas.hasInteraction());}
         void bindRow()
         {
             const auto* lane=host.controller.lane(row.lane);const auto* owner=host.controller.owner(row.owner);if(!owner)return;
-            const auto& c=owner->capabilities;
-            presentation::TimelineChromeCapabilities caps;
-            caps.navigation=lane&&lane->navigation;caps.mute=c.mute;caps.solo=c.solo;caps.open=c.open;caps.monitoring=c.monitoring;
-            caps.resizable=lane&&lane->heightPolicy==HeightPolicy::manual;
-            caps.inputMeterCount=lane?lane->inputMeterCount:0;caps.outputMeterCount=lane?lane->outputMeterCount:0;
+            auto caps=lane?host.controller.chromeCapabilities(*lane):presentation::TimelineChromeCapabilities{};
+            if(!lane){ // Structural owner rows have no lane navigation or resize.
+                caps.navigation=false;caps.resizable=false;
+                caps.mute=owner->capabilities.mute;caps.solo=owner->capabilities.solo;
+                caps.open=owner->capabilities.open;caps.monitoring=owner->capabilities.monitoring;
+            }
             geometry=presentation::layoutTimelineLaneChrome(getWidth(),getHeight(),caps,host.controller.view().chrome);
             for(std::size_t i=0;i<buttons.size();++i){buttons[i]->setBounds(rectangle(geometry.buttons[i]));buttons[i]->setVisible(!geometry.buttons[i].empty());}
             buttons[2]->setToggleState(owner->muted,juce::dontSendNotification);
@@ -332,11 +348,18 @@ private:
             buttons[5]->setToggleState(owner->monitoring!=Monitoring::automatic,juce::dontSendNotification);
             TimelineIdentityContent nextIdentity;
             const bool isGlobal=owner->role==OwnerRole::global;
-            nextIdentity.primary=lane&&isGlobal?text(lane->name):text(owner->name);
-            nextIdentity.secondary=lane&&!isGlobal?text(lane->name):juce::String{};
+            nextIdentity.track=lane&&isGlobal?text(lane->name):text(owner->name);
+            nextIdentity.type=lane&&!isGlobal?streamName(lane->stream):juce::String{};
+            // Resolve actual ancestry; never parse display names or substitute
+            // the Song as a performer for song-owned tracks.
+            auto* ancestor=owner;
+            for(std::size_t depth=0;ancestor&&depth<host.controller.snapshot().owners.size();++depth) {
+                if(ancestor->role==OwnerRole::performer){nextIdentity.performer=text(ancestor->name);break;}
+                ancestor=host.controller.owner(ancestor->parent);
+            }
             nextIdentity.ownerColour=juce::Colour(owner->colour);
             nextIdentity.typeColour=lane&&host.style.streamColour?host.style.streamColour(lane->stream):host.style.foreground;
-            nextIdentity.compact=isGlobal||getHeight()<48;
+            nextIdentity.compact=isGlobal;
             nextIdentity.onLeft=host.controller.view().chrome.nameSide==presentation::TimelineNameSide::left;
             nextIdentity.selected=host.controller.view().selectedLanes.contains(row.lane);
             nextIdentity.showType=host.controller.view().chrome.typeColour;
@@ -345,10 +368,8 @@ private:
                 identityContent=nextIdentity;identityArea=contentBounds;identityEpoch=host.frameEpoch;identityReady=true;
                 identityLayout=TimelineIdentityLayout::make(contentBounds,identityContent,host.style.identityTypography);
                 identityBackdrop=host.painter.prepareIdentity(identityContent,identityLayout);
+                underlayDirty=true;
             }
-            nameBounds=identityLayout.primary;
-            nameInput.setBounds(nameBounds);laneNameInput.setBounds(identityLayout.secondary);
-            if(!nameEditor.isVisible())laneNameInput.setVisible(identityLayout.twoLines);
             resizeInput.toFront(false);
             resizeInput.setBounds(rectangle(geometry.resizeHit));resizeInput.setVisible(!geometry.resizeHit.empty());resizeInput.toFront(false);
             if(canvas.component&&lane){
@@ -356,11 +377,17 @@ private:
                 CanvasFrame f;f.width=canvas.component->getWidth();f.height=getHeight();f.durationSeconds=host.durationSeconds;
                 f.revision=host.controller.snapshot().revision;f.time=host.time;
                 f.time.originX-=geometry.content.x;f.selected=host.controller.view().selectedLanes.contains(lane->id);f.ownerColour=owner->colour;
-                if(!lastFrame||*lastFrame!=f||lastEpoch!=host.frameEpoch){if(canvas.bind)canvas.bind(*lane,f);lastFrame=f;lastEpoch=host.frameEpoch;}
+                if(!lastFrame||*lastFrame!=f||lastEpoch!=host.frameEpoch){if(canvas.bind)canvas.bind(*lane,f);lastFrame=f;lastEpoch=host.frameEpoch;underlayDirty=true;}
             }
             if(lane&&lane->heightPolicy==HeightPolicy::automatic&&canvas.preferredHeight)
                 if(host.controller.setAutoHeight(lane->id,canvas.preferredHeight(geometry.content.width)))host.triggerAsyncUpdate();
+            sampleIdentityPointer(); // includes stationary-pointer scroll / zoom
             repaint();
+        }
+        void visibilityChanged() override
+        {
+            if(!isVisible())identityHover.reset();
+            underlayDirty=true;
         }
         void paint(juce::Graphics& g)override
         {
@@ -369,17 +396,18 @@ private:
             g.fillAll(selected?host.style.background.interpolatedWith(colour,0.18f):host.style.background);
             for(auto rail:{geometry.leftAccent,geometry.rightAccent})if(!rail.empty())
                 host.painter.drawAccent(g,rectangle(rail).toFloat(),selected?colour:colour.withMultipliedAlpha(0.80f));
-            if(const auto* lane=host.controller.lane(row.lane);lane&&host.controller.view().chrome.typeColour){
-                const auto type=host.style.streamColour?host.style.streamColour(lane->stream):host.style.foreground;
-                g.setColour(type);const auto rail=geometry.leftAccent.empty()?geometry.rightAccent:geometry.leftAccent;
-                g.fillRect(rail.x+rail.width-2,rail.y,2,rail.height);
-            }
+            // One well for the complete bank; child buttons draw glyphs/state only.
+            for(const auto group:{geometry.leftGroup,geometry.rightGroup})if(!group.empty())
+                host.painter.drawControlGroup(g,rectangle(group).toFloat());
         }
         void paintOverChildren(juce::Graphics& g)override
         {
             const auto* owner=host.controller.owner(row.owner);if(!owner)return;
-            if(!nameEditor.isVisible())
+            if(!identityHover.hidden()) {
+                prepareUnderlayIfNeeded(g);
+                host.painter.drawIdentityUnderlay(g,identityLayout,identityUnderlay,underlayBounds);
                 host.painter.drawIdentity(g,identityContent,identityLayout,identityBackdrop);
+            }
             if(!geometry.resizeGlyph.empty()){
                 const auto r=rectangle(geometry.resizeGlyph);g.setColour(host.style.foreground.withAlpha(0.75f));
                 g.drawHorizontalLine(r.getY(),static_cast<float>(r.getX()),static_cast<float>(r.getRight()));
@@ -433,12 +461,14 @@ private:
         {if(key==juce::KeyPress::escapeKey&&resizing){resizing=false;host.controller.endResize(false);host.refresh();return true;}return false;}
     private:
         TimelinePanel& host;LaneCanvas canvas;ChromeGeometry geometry;std::optional<VisualKind> createdVisual;
-        std::uint64_t renameRevision=0;
         std::array<std::unique_ptr<juce::Button>,6> buttons;
-        NameInput nameInput,laneNameInput;ResizeInput resizeInput;juce::TextEditor nameEditor;juce::Rectangle<int> nameBounds;
+        PointerObserver pointerObserver;ResizeInput resizeInput;
         TimelineIdentityContent identityContent; TimelineIdentityLayout identityLayout;
         juce::Image identityBackdrop; juce::Rectangle<int> identityArea;
-        std::uint64_t identityEpoch=0; bool identityReady=false,renameOwnerTarget=false;
+        std::uint64_t identityEpoch=0; bool identityReady=false;
+        TimelineIdentityHoverState identityHover;
+        juce::Image identityUnderlay;juce::Rectangle<int> underlayBounds;
+        bool underlayDirty=true;float underlayScale=0.0f;
         std::optional<CanvasFrame> lastFrame;std::uint64_t lastEpoch=0;
         MeterReadback input,output;bool accentDown=false,dragging=false,deferredSelection=false,resizing=false;int resizeStart=0;
         void drawMeters(juce::Graphics& g,const MeterReadback& data,presentation::TimelineChromeRect bounds)
@@ -451,23 +481,42 @@ private:
                 host.painter.drawMeter(g,r,v);
             }
         }
-        void beginRename(bool primary)
+        void updateIdentityPointer(juce::Point<float> p)
         {
-            const auto* lane=host.controller.lane(row.lane);const auto* owner=host.controller.owner(row.owner);
-            if(!lane||!owner)return;
-            renameOwnerTarget=primary&&owner->role!=OwnerRole::global;
-            renameRevision=host.controller.snapshot().revision;
-            nameInput.setVisible(false);laneNameInput.setVisible(false);
-            nameEditor.setBounds((primary?identityLayout.primary:identityLayout.secondary).expanded(4,2));
-            nameEditor.setFont(primary?identityLayout.primaryFont:identityLayout.secondaryFont);
-            nameEditor.setText(text(renameOwnerTarget?owner->name:lane->name),false);
-            nameEditor.setVisible(true);nameEditor.toFront(true);nameEditor.selectAll();nameEditor.grabKeyboardFocus();repaint();
+            const auto inBody=host.body.getLocalPoint(this,p);
+            const bool inside=isShowing()&&host.body.getLocalBounds().toFloat().contains(inBody)
+                &&identityLayout.backdrop.toFloat().contains(p);
+            bool clip=false;
+            if(inside&&!identityHover.hidden()&&canvas.component&&canvas.containsClipAt) {
+                const auto local=canvas.component->getLocalPoint(this,p);
+                auto* target=getComponentAt(p.roundToInt());
+                // An overlaid resize affordance/control is not the canvas.
+                if(target&&(target==canvas.component.get()||canvas.component->isParentOf(target)))
+                    clip=canvas.containsClipAt(local);
+            }
+            if(identityHover.update(inside,clip)) {
+                underlayDirty=true;
+                repaint(identityLayout.backdrop);
+            }
         }
-        void finishRename()
+        void sampleIdentityPointer()
         {
-            const auto label=nameEditor.getText().trim().toStdString();nameEditor.setVisible(false);nameInput.setVisible(true);laneNameInput.setVisible(identityLayout.twoLines);
-            const auto id=renameOwnerTarget?row.owner:row.lane; const bool ownerTarget=renameOwnerTarget;const auto session=host.session;const auto revision=renameRevision;juce::Component::SafePointer<TimelinePanel> safe(&host);
-            juce::MessageManager::callAsync([safe,id,session,label,revision,ownerTarget]{if(safe&&safe->session==session){safe->report(safe->controller.snapshot().revision==revision?(ownerTarget?safe->controller.renameOwner(id,label):safe->controller.rename(id,label)):Result::fail("Rename context expired"));safe->refresh();}});
+            const auto screen=juce::Desktop::getInstance().getMainMouseSource().getScreenPosition();
+            updateIdentityPointer(getLocalPoint(nullptr,screen));
+        }
+        void prepareUnderlayIfNeeded(juce::Graphics& g)
+        {
+            const int padding=host.painter.identityBackdropPadding();
+            if(!canvas.component||padding<=0||identityLayout.backdrop.isEmpty())return;
+            const float scale=juce::jlimit(1.0f,4.0f,g.getInternalContext().getPhysicalPixelScaleFactor());
+            if(!underlayDirty&&scale==underlayScale)return;
+            underlayBounds=identityLayout.backdrop.expanded(padding).getIntersection(canvas.component->getBounds());
+            const auto local=underlayBounds.translated(-canvas.component->getX(),-canvas.component->getY());
+            // Snapshot only the underlying CANVAS subtree, never LaneRow. This
+            // cannot capture/recurse into the lens and has bounded pixel area.
+            auto pixels=canvas.component->createComponentSnapshot(local,true,scale);
+            identityUnderlay=host.painter.prepareIdentityUnderlay(pixels,scale,identityLayout,underlayBounds);
+            underlayDirty=false;underlayScale=scale;
         }
         void action(LaneButton action)
         {

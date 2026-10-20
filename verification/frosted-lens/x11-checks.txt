@@ -1,0 +1,9 @@
+Native full application: source profile, Debug, Xvfb :97 / Openbox.
+The whole app was launched and rendered, not only an isolated painter.
+XTest pointer over real Audio clip identity: only that lens disappeared.
+Moving pointer outside restored the Audio lens pixel-for-pixel (ROI diff none).
+XTest over MIDI / Image clip identities: corresponding lens disappeared.
+Zooming out to empty canvas and hovering over the identity: no pixel change.
+Dark and Light full-application screenshots acquired.
+Application closed through _NET_CLOSE_WINDOW; process exited, log has only JUCE version.
+These are UI smoke checks, not a decoded-media performance or macOS acceptance test.

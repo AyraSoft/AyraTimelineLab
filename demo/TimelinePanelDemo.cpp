@@ -7,6 +7,7 @@
 #include "PanelFixture.h"
 #include "PanelClipWindow.h"
 #include "TimelineIdentityArtwork.h"
+#include "TimelineLaneControls.h"
 #include "../modules/ayra_timeline_panel/TimelinePanel.h"
 
 namespace ayra::lab
@@ -17,46 +18,21 @@ namespace
 // Lab. No copied meter renderer, recessed recipe, accent painter or icon data.
 class PanelArtwork final : public panel::TimelinePanelLookAndFeel
 {
-    class RecessedIcon final : public ayra::ShapeIconButton
-    {
-    public:
-        explicit RecessedIcon(const juce::String& label = {}) : ShapeIconButton(label)
-        { setDrawBackground(false); setIconPadding(0.22f); }
-        void paintButton(juce::Graphics& g, bool over, bool down) override
-        { ayra::drawFlagToolbarWell(g,getLocalBounds().toFloat()); ShapeIconButton::paintButton(g,over,down); }
-    };
-    class RecessedLetter final : public juce::Button
-    {
-    public:
-        RecessedLetter(juce::String label, LabLookAndFeel& look):Button(label),laf(look){}
-        void paintButton(juce::Graphics& g,bool over,bool down) override
-        {
-            ayra::drawFlagToolbarWell(g,getLocalBounds().toFloat());
-            const auto& p=laf.colours();
-            g.setColour(getToggleState()?(getName()=="M"?p.mute:p.solo):(over||down?p.value:p.text));
-            g.setFont(juce::Font(juce::FontOptions().withHeight(12.0f).withStyle("Bold")));
-            g.drawText(getName(),getLocalBounds(),juce::Justification::centred);
-        }
-    private: LabLookAndFeel& laf;
-    };
 public:
     explicit PanelArtwork(LabLookAndFeel& look):laf(look){}
     std::unique_ptr<juce::Button> makeButton(panel::LaneButton kind) override
-    {
-        using B=panel::LaneButton;
-        if(kind==B::mute||kind==B::solo)return std::make_unique<RecessedLetter>(kind==B::mute?"M":"S",laf);
-        auto result=std::make_unique<RecessedIcon>();
-        if(kind==B::open)result->setGlyph(ayra::glyphs::window);
-        else if(kind==B::monitoring)result->setGlyph(ayra::glyphs::audio);
-        else {
-            auto path=ayra::glyphs::rewind.path();
-            if(kind==B::next)path.applyTransform(juce::AffineTransform::scale(-1.0f,1.0f));
-            result->setShape(std::move(path));
-        }
-        return result;
-    }
+    {return TimelineLaneControls::makeButton(kind);}
+    void drawControlGroup(juce::Graphics& g,juce::Rectangle<float> bounds)const override
+    {TimelineLaneControls::drawGroup(g,bounds);}
     juce::Image prepareIdentity(const panel::TimelineIdentityContent& c,const panel::TimelineIdentityLayout& layout)const override
     {return TimelineIdentityArtwork::prepare(c,layout);}
+    int identityBackdropPadding()const noexcept override {return 15;}
+    juce::Image prepareIdentityUnderlay(const juce::Image& source,float scale,
+                                       const panel::TimelineIdentityLayout& layout,juce::Rectangle<int> bounds)const override
+    {return TimelineIdentityArtwork::prepareUnderlay(source,scale,layout,bounds);}
+    void drawIdentityUnderlay(juce::Graphics& g,const panel::TimelineIdentityLayout& layout,
+                              const juce::Image& image,juce::Rectangle<int> bounds)const override
+    {TimelineIdentityArtwork::drawUnderlay(g,layout,image,bounds);}
     void drawIdentity(juce::Graphics& g,const panel::TimelineIdentityContent& c,const panel::TimelineIdentityLayout& layout,const juce::Image& image)const override
     {TimelineIdentityArtwork::draw(g,c,layout,image);}
     void drawAccent(juce::Graphics& g,juce::Rectangle<float> r,juce::Colour c) const override
@@ -73,6 +49,8 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
     auto* raw=component.get();const auto key=std::make_pair(sourceLane.id,sourceLane.visual);
     if(const auto it=states.find(key);it!=states.end())raw->restorePanelState(it->second);
     panel::LaneCanvas result;
+    if constexpr(requires {raw->containsPanelClipAt(juce::Point<float>{});})
+        result.containsClipAt=[raw](juce::Point<float> point){return raw->containsPanelClipAt(point);};
     result.saveState=[raw,&states,key]{states[key]=raw->capturePanelState();};
     result.hasInteraction=[raw]{return raw->isMouseButtonDown(true)||raw->hasKeyboardFocus(true);};
     if constexpr(requires {raw->panelEventTimes();})result.eventTimes=[raw]{return raw->panelEventTimes();};
@@ -203,7 +181,7 @@ private:
     std::vector<panel::EventRef> selectedEvents;
     std::map<std::string,int> previousLegacyHeights;
     bool dark=true,warpOn=true,gainOn=true;unsigned groupSequence=0;
-    std::string message="Accento: selezione/riordino. Bordo inferiore: resize. Doppio click sul nome: rinomina. Meter sintetici opzionali.";
+    std::string message="Accento: selezione/riordino. Bordo inferiore: resize. Identita non editabile: si nasconde sopra le clip al passaggio del mouse. Meter sintetici opzionali.";
     template<class F>void addButton(juce::TextButton& b,F f){b.onClick=std::move(f);addAndMakeVisible(b);}
     static bool localPreview(const panel::Lane& lane)
     {return lane.visual==panel::VisualKind::point || lane.visual==panel::VisualKind::span || lane.visual==panel::VisualKind::continuous;}

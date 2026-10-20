@@ -258,8 +258,10 @@ public:
     {
         const auto* l=lane(id);if(!l || l->heightPolicy!=HeightPolicy::automatic)return false;
         pixels=std::clamp(pixels,l->minimumHeight,l->maximumHeight);
-        if(height(id)==pixels)return false;
-        autoHeights[id]=pixels;updateIndexedHeight(id);return true;
+        const auto before=height(id);
+        autoHeights[id]=pixels;
+        if(height(id)==before)return false;
+        updateIndexedHeight(id);return true;
     }
     Result renameOwner(const Id& id,std::string label)
     {
@@ -292,16 +294,34 @@ public:
     { const auto i = laneIndex.find(id); return i == laneIndex.end() ? nullptr : &model.lanes[i->second]; }
     const Event* event(const EventRef& ref) const noexcept
     { const auto i = eventIndex.find(ref); return i == eventIndex.end() ? nullptr : &model.events[i->second]; }
+    ayra::timeline::TimelineChromeCapabilities chromeCapabilities(const Lane& l) const noexcept
+    {
+        ayra::timeline::TimelineChromeCapabilities caps;
+        const auto* o=owner(l.owner);
+        caps.navigation=l.navigation;
+        caps.mute=o&&o->capabilities.mute;caps.solo=o&&o->capabilities.solo;
+        caps.open=o&&o->capabilities.open;caps.monitoring=o&&o->capabilities.monitoring;
+        caps.resizable=l.heightPolicy==HeightPolicy::manual;
+        caps.inputMeterCount=l.inputMeterCount;caps.outputMeterCount=l.outputMeterCount;
+        return caps;
+    }
+    int minimumHeight(const Lane& l) const noexcept
+    {return std::max(l.minimumHeight,ayra::timeline::minimumTimelineLaneChromeHeight(chromeCapabilities(l),state.chrome));}
+    int maximumHeight(const Lane& l) const noexcept
+    {return std::max(l.maximumHeight,minimumHeight(l));}
     int height(const Id& id) const
     {
-        const auto* l = lane(id); if (!l) return 0;
-        if(l->heightPolicy==HeightPolicy::compact)return l->initialHeight;
+        const auto* l=lane(id);if(!l)return 0;
+        int requested=l->initialHeight;
         if(l->heightPolicy==HeightPolicy::automatic) {
-            const auto a=autoHeights.find(id);return a==autoHeights.end()?l->initialHeight:a->second;
+            if(const auto a=autoHeights.find(id);a!=autoHeights.end())requested=a->second;
+        } else if(l->heightPolicy==HeightPolicy::manual) {
+            if(resize&&resize->lane==id)requested=resize->preview;
+            else if(const auto i=state.heights.find(id);i!=state.heights.end())requested=i->second;
         }
-        if (resize && resize->lane == id) return resize->preview;
-        const auto i = state.heights.find(id);
-        return i == state.heights.end() ? l->initialHeight : i->second;
+        // The chrome floor is presentation-only, including compact/auto lanes.
+        // Hiding buttons reveals the original requested height, not a mutated document.
+        return std::clamp(requested,minimumHeight(*l),maximumHeight(*l));
     }
     bool setMode(Mode mode)
     {
@@ -416,7 +436,7 @@ public:
     bool setHeight(const Id& id, int pixels)
     {
         const auto* l = lane(id); if (!l || resize || l->heightPolicy!=HeightPolicy::manual) return false;
-        pixels = std::clamp(pixels, l->minimumHeight, l->maximumHeight);
+        pixels = std::clamp(pixels, minimumHeight(*l), maximumHeight(*l));
         if (pixels == height(id)) return false;
         auto next = state; next.heights[id] = pixels; return change(std::move(next));
     }
@@ -431,7 +451,7 @@ public:
         if (!resize || !std::isfinite(delta)) return false;
         const auto* l = lane(resize->lane); if (!l) { resize.reset(); return false; }
         resize->preview = static_cast<int>(std::clamp(std::round(resize->original + delta),
-            static_cast<double>(l->minimumHeight), static_cast<double>(l->maximumHeight)));
+            static_cast<double>(minimumHeight(*l)), static_cast<double>(maximumHeight(*l))));
         updateIndexedHeight(resize->lane); return true;
     }
     bool endResize(bool commit)
@@ -642,7 +662,7 @@ private:
         if (resize)
         {
             if (const auto* l = lane(resize->lane))
-                resize->preview = std::clamp(resize->preview, l->minimumHeight, l->maximumHeight);
+                resize->preview = std::clamp(resize->preview, minimumHeight(*l), maximumHeight(*l));
             else resize.reset();
         }
     }

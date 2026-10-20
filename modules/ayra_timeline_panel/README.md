@@ -1,3 +1,7 @@
+> Current identity override: compact HTML frosted lens, no editable text,
+> no input forwarding proxy. Hide only on a real clip hit and retain that state
+> until pointer exit. See `docs/FROSTED_LENS.md` for the current contract.
+
 # Ayra Timeline Panel — no-header presentation
 
 `TimelineModel.h` is C++20 without JUCE. The native `TimelinePanel.h` consumes it

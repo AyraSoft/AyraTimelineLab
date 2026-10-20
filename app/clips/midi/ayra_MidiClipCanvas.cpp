@@ -163,6 +163,14 @@ class MidiClipCanvas final : public juce::Component,
 public:
   CanvasViewportBinding panelView;
 
+  // The identity lens uses the exact clip/edit hit regions (including rails
+  // and handles), not an approximate lane-wide temporal rectangle.
+  bool containsPanelClipAt(juce::Point<float> point) const
+  {
+      return getLocalBounds().toFloat().contains(point) && hitTestZones(point).clip != nullptr;
+  }
+
+
   std::shared_ptr<void> capturePanelState() const
   {
       using State = std::tuple<decltype(uiStates)>;

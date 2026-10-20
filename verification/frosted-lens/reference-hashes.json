@@ -1,0 +1,8 @@
+{
+  "html_sha256": "492039f078135934836158bdaccece4bdd21a32e57cbf2370027cd75d487e877",
+  "multiverse_visual_reference": "459d8c5cfc4e06bd849db12799e447ec90be3feb",
+  "verified_visual_files": 30,
+  "timeline_presentation_reference": "caa00902884214bf808befae294efe59c1b088fa",
+  "curves_header_git_blob": "0a2b3c6ac6822d2fdc4c1ff4c9d5b3ce95e634f7",
+  "scope": "Read-only source slices verified by Git blob/SHA256 hashes; not a full Multiverse product build. No private sources published."
+}

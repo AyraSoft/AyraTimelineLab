@@ -1,3 +1,7 @@
+> Historical identity/rename revision. The approved HTML lens and passive
+> hover policy now live in `docs/FROSTED_LENS.md`; current execution evidence
+> is in `verification/frosted-lens/STATUS.md`. Visual-source wiring is retained.
+
 # Identity and visual-source verification — 20 October 2026
 
 Source workspace: unpublished no-header checkpoint `278060c` plus the identity and

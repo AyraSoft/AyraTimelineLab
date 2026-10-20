@@ -1,3 +1,7 @@
+> Current identity override: compact HTML frosted lens, no editable text,
+> no input forwarding proxy. Hide only on a real clip hit and retain that state
+> until pointer exit. See `docs/FROSTED_LENS.md` for the current contract.
+
 # Timeline senza header — implementazione e integrazione nativa
 
 Questa iterazione sostituisce il separatore-header della vista libera, non lo

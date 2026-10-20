@@ -174,9 +174,9 @@ void noHeaderPolicies()
     auto s=fixture();s.lanes.back().heightPolicy=HeightPolicy::compact;
     s.lanes.back().minimumHeight=16;s.lanes.back().initialHeight=24;
     Controller c;CHECK(c.adopt(s));CHECK(c.setMode(Mode::freeLanes));
-    double sum=0;for(const auto& lane:s.lanes)sum+=lane.initialHeight;
+    double sum=0;for(const auto& lane:s.lanes)sum+=c.height(lane.id);
     CHECK(c.totalHeight()==sum);CHECK(Controller::seamHeight==0);
-    CHECK(c.height("tempo")==24);CHECK(!c.beginResize("tempo"));CHECK(!c.setHeight("tempo",200));
+    CHECK(c.height("tempo")==32);CHECK(!c.beginResize("tempo"));CHECK(!c.setHeight("tempo",200));
     const auto oldHeight=c.height("a.audio");CHECK(c.beginResize("a.audio"));
     CHECK(c.updateResize(31));CHECK(c.height("a.audio")==oldHeight+31);c.endResize(false);
     CHECK(c.height("a.audio")==oldHeight);CHECK(c.totalHeight()==sum);
@@ -186,7 +186,7 @@ void noHeaderPolicies()
     CHECK(c.setLaneVisible("a.audio",true));CHECK(c.totalHeight()==sum);
     CHECK(!c.setLaneVisible("tempo",false));
     auto chrome=c.view().chrome;chrome.navigation=false;chrome.inputMeters=true;
-    CHECK(c.setChrome(chrome));CHECK(c.view().chrome==chrome);CHECK(c.totalHeight()==sum);
+    CHECK(c.setChrome(chrome));CHECK(c.view().chrome==chrome);CHECK(c.height("tempo")==24);CHECK(c.totalHeight()==sum-8);
     Command captured;c.onCommand=[&](const Command& command){captured=command;return Result{};};
     CHECK(c.rename("a.audio","New name"));CHECK(captured.kind==CommandKind::renameLane);
     CHECK(captured.owner=="a"&&captured.lane=="a.audio"&&captured.label=="New name");
@@ -194,10 +194,30 @@ void noHeaderPolicies()
     s.lanes[0].heightPolicy=HeightPolicy::automatic;CHECK(c.adopt(s));
     CHECK(c.setAutoHeight("a.audio",81));CHECK(c.height("a.audio")==81);CHECK(!c.beginResize("a.audio"));
 }
+void chromeHeightFloor()
+{
+    auto s=fixture();s.lanes[0].minimumHeight=16;s.lanes[0].initialHeight=24;s.lanes[0].maximumHeight=40;
+    Controller c;CHECK(c.adopt(s));CHECK(c.setMode(Mode::freeLanes));
+    CHECK(c.height("a.audio")==56);CHECK(c.snapshot().lanes[0].initialHeight==24);
+    CHECK(c.beginResize("a.audio"));CHECK(c.updateResize(-10000));CHECK(c.height("a.audio")==56);
+    CHECK(!c.endResize(true)); // clamped no-op
+    auto chrome=c.view().chrome;chrome.navigation=false;chrome.mute=false;chrome.solo=false;
+    chrome.monitoring=false;chrome.open=false;
+    CHECK(c.setChrome(chrome));CHECK(c.height("a.audio")==24);
+    CHECK(c.setHeight("a.audio",16));CHECK(c.height("a.audio")==16);
+    chrome.open=true;chrome.monitoring=true;CHECK(c.setChrome(chrome));CHECK(c.height("a.audio")==56);
+    CHECK(c.undoView());CHECK(c.height("a.audio")==16);
+    CHECK(c.redoView());CHECK(c.height("a.audio")==56);
+    s.lanes[0].heightPolicy=HeightPolicy::automatic;++s.revision;CHECK(c.adopt(s));
+    CHECK(!c.setAutoHeight("a.audio",18));CHECK(c.height("a.audio")==56);
+    CHECK(!c.setAutoHeight("a.audio",18)); // no auto-layout loop under the floor
+    chrome.open=false;chrome.monitoring=false;CHECK(c.setChrome(chrome));CHECK(c.height("a.audio")==18);
+}
+
 }
 int main()
 {
-    noHeaderPolicies();
+    noHeaderPolicies();chromeHeightFloor();
     validation(); layout(); resizeAndViewport(); commands(); largeHierarchy();
     std::cout << "PASS " << checks << " checks (presentation only; no native GUI claim)\n";
 }

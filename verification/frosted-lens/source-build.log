@@ -1,0 +1,165 @@
+-- The C compiler identification is Clang 17.0.0
+-- The CXX compiler identification is Clang 17.0.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/local/swift/usr/bin/clang - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/local/swift/usr/bin/clang++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Found Python3: /opt/pyvenv/bin/python3 (found version "3.13.5") found components: Interpreter
+-- Ayra visual source: Multiverse source leaves + original standard buttons (Lab adapter, not full ApplicationLookAndFeel)
+-- Found PkgConfig: /usr/bin/pkg-config (found version "1.8.1")
+-- Checking for module 'alsa'
+--   Found alsa, version 1.2.14
+-- Checking for modules 'freetype2;fontconfig'
+--   Found freetype2, version 26.2.20
+--   Found fontconfig, version 2.15.0
+-- Checking for module 'gl'
+--   Found gl, version 1.2
+-- Checking for module 'libcurl'
+--   Found libcurl, version 8.10.1
+-- Checking for modules 'webkit2gtk-4.0;gtk+-x11-3.0'
+--   Package 'webkit2gtk-4.0', required by 'virtual:world', not found
+--   Package 'gtk+-x11-3.0', required by 'virtual:world', not found
+-- Configuring juceaide
+-- Building juceaide
+-- Exporting juceaide
+-- Testing juceaide
+-- Finished setting up juceaide
+-- Configuring done (61.2s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/lens-work/build-native
+[  1%] Building CXX object CMakeFiles/ayra_lab_core.dir/core/LabModel.cpp.o
+[  3%] Building CXX object CMakeFiles/ayra_panel_native_tests.dir/tests/NativePanelTests.cpp.o
+[  5%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/tests/ClipComponentTests.cpp.o
+[  6%] Building CXX object CMakeFiles/ayra_lab_core.dir/generated/FixtureData.cpp.o
+[  8%] Linking CXX static library libayra_lab_core.a
+[  8%] Built target ayra_lab_core
+[ 10%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/app/clips/ayra_clips.cpp.o
+[ 11%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/ayra_ui/ayra_ui.cpp.o
+[ 13%] Building CXX object CMakeFiles/ayra_panel_native_tests.dir/mnt/data/lens-work/JUCE/modules/juce_gui_basics/juce_gui_basics.cpp.o
+[ 15%] Building CXX object CMakeFiles/ayra_panel_native_tests.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics.cpp.o
+[ 16%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/providers/ayra_curves/ayra_curves.cpp.o
+[ 18%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/JUCE/modules/juce_gui_extra/juce_gui_extra.cpp.o
+[ 20%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/JUCE/modules/juce_gui_basics/juce_gui_basics.cpp.o
+[ 21%] Building CXX object CMakeFiles/ayra_panel_native_tests.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics_Harfbuzz.cpp.o
+[ 23%] Building C object CMakeFiles/ayra_panel_native_tests.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics_Sheenbidi.c.o
+[ 25%] Building CXX object CMakeFiles/ayra_panel_native_tests.dir/mnt/data/lens-work/JUCE/modules/juce_events/juce_events.cpp.o
+[ 26%] Building CXX object CMakeFiles/ayra_lab_tests.dir/tests/CoreTests.cpp.o
+[ 28%] Linking CXX executable ayra_lab_tests
+[ 28%] Built target ayra_lab_tests
+[ 30%] Building CXX object CMakeFiles/ayra_timeline_panel_tests.dir/tests/TimelinePanelTests.cpp.o
+[ 31%] Building CXX object CMakeFiles/ayra_panel_native_tests.dir/mnt/data/lens-work/JUCE/modules/juce_core/juce_core.cpp.o
+[ 33%] Linking CXX executable ayra_timeline_panel_tests
+[ 33%] Built target ayra_timeline_panel_tests
+[ 35%] Building CXX object CMakeFiles/ayra_panel_fixture_tests.dir/tests/PanelFixtureTests.cpp.o
+[ 36%] Linking CXX executable ayra_panel_fixture_tests
+[ 36%] Built target ayra_panel_fixture_tests
+[ 38%] Building CXX object CMakeFiles/AyraTimelineLab.dir/generated/MultiverseButtons.cpp.o
+[ 40%] Building CXX object CMakeFiles/ayra_panel_native_tests.dir/mnt/data/lens-work/JUCE/modules/juce_core/juce_core_CompilationTime.cpp.o
+[ 41%] Building CXX object CMakeFiles/ayra_panel_native_tests.dir/mnt/data/lens-work/JUCE/modules/juce_data_structures/juce_data_structures.cpp.o
+[ 43%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics.cpp.o
+[ 45%] Linking CXX executable ayra_panel_native_tests
+[ 46%] Building CXX object CMakeFiles/AyraTimelineLab.dir/app/Main.cpp.o
+[ 46%] Built target ayra_panel_native_tests
+[ 48%] Building CXX object CMakeFiles/ayra_lab_codec_tests.dir/tests/CodecTests.cpp.o
+[ 50%] Building CXX object CMakeFiles/ayra_lab_codec_tests.dir/app/SessionCodec.cpp.o
+[ 51%] Building CXX object CMakeFiles/ayra_lab_codec_tests.dir/mnt/data/lens-work/JUCE/modules/juce_core/juce_core.cpp.o
+[ 53%] Building CXX object CMakeFiles/AyraTimelineLab.dir/demo/TimelinePanelDemo.cpp.o
+[ 55%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics_Harfbuzz.cpp.o
+[ 56%] Building CXX object CMakeFiles/ayra_lab_codec_tests.dir/mnt/data/lens-work/JUCE/modules/juce_core/juce_core_CompilationTime.cpp.o
+[ 58%] Linking CXX executable ayra_lab_codec_tests
+[ 58%] Built target ayra_lab_codec_tests
+[ 60%] Building C object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics_Sheenbidi.c.o
+[ 61%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/JUCE/modules/juce_events/juce_events.cpp.o
+[ 63%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/JUCE/modules/juce_core/juce_core.cpp.o
+[ 65%] Building CXX object CMakeFiles/AyraTimelineLab.dir/app/clips/ayra_clips.cpp.o
+[ 66%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/JUCE/modules/juce_core/juce_core_CompilationTime.cpp.o
+[ 68%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/JUCE/modules/juce_data_structures/juce_data_structures.cpp.o
+[ 70%] Building CXX object CMakeFiles/ayra_lab_clip_tests.dir/mnt/data/lens-work/JUCE/modules/juce_audio_basics/juce_audio_basics.cpp.o
+[ 71%] Building CXX object CMakeFiles/AyraTimelineLab.dir/app/TrackHeader.cpp.o
+[ 73%] Building CXX object CMakeFiles/AyraTimelineLab.dir/app/LabLookAndFeel.cpp.o
+[ 75%] Linking CXX executable ayra_lab_clip_tests
+[ 76%] Building CXX object CMakeFiles/AyraTimelineLab.dir/app/CanonicalTheme.cpp.o
+[ 76%] Built target ayra_lab_clip_tests
+[ 78%] Building CXX object CMakeFiles/AyraTimelineLab.dir/app/SessionCodec.cpp.o
+[ 80%] Building CXX object CMakeFiles/AyraTimelineLab.dir/ayra_ui/ayra_ui.cpp.o
+[ 81%] Building CXX object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/providers/ayra_curves/ayra_curves.cpp.o
+[ 83%] Building CXX object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/JUCE/modules/juce_gui_extra/juce_gui_extra.cpp.o
+[ 85%] Building CXX object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/JUCE/modules/juce_gui_basics/juce_gui_basics.cpp.o
+[ 86%] Building CXX object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics.cpp.o
+[ 88%] Building CXX object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics_Harfbuzz.cpp.o
+[ 90%] Building C object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics_Sheenbidi.c.o
+[ 91%] Building CXX object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/JUCE/modules/juce_events/juce_events.cpp.o
+[ 93%] Building CXX object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/JUCE/modules/juce_core/juce_core.cpp.o
+[ 95%] Building CXX object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/JUCE/modules/juce_core/juce_core_CompilationTime.cpp.o
+[ 96%] Building CXX object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/JUCE/modules/juce_data_structures/juce_data_structures.cpp.o
+[ 98%] Building CXX object CMakeFiles/AyraTimelineLab.dir/mnt/data/lens-work/JUCE/modules/juce_audio_basics/juce_audio_basics.cpp.o
+[100%] Linking CXX executable "AyraTimelineLab_artefacts/Debug/Ayra Timeline Lab"
+[100%] Built target AyraTimelineLab
+Internal ctest changing into directory: /mnt/data/lens-work/build-native
+Test project /mnt/data/lens-work/build-native
+    Start 1: core_regressions
+1/7 Test #1: core_regressions .................   Passed    0.00 sec
+    Start 2: timeline_panel_contracts
+2/7 Test #2: timeline_panel_contracts .........   Passed    0.09 sec
+    Start 3: timeline_fixture_transactions
+3/7 Test #3: timeline_fixture_transactions ....   Passed    0.06 sec
+    Start 4: fixture_sources
+4/7 Test #4: fixture_sources ..................   Passed    0.73 sec
+    Start 5: codec_regressions
+5/7 Test #5: codec_regressions ................   Passed    0.03 sec
+    Start 6: clip_component_regressions
+6/7 Test #6: clip_component_regressions .......   Passed    0.22 sec
+    Start 7: native_panel_interactions
+7/7 Test #7: native_panel_interactions ........   Passed    3.47 sec
+
+100% tests passed, 0 tests failed out of 7
+
+Total Test time (real) =   4.61 sec
+-- Ayra visual source: Multiverse source leaves + original standard buttons (Lab adapter, not full ApplicationLookAndFeel)
+-- Checking for modules 'webkit2gtk-4.0;gtk+-x11-3.0'
+--   Package 'webkit2gtk-4.0', required by 'virtual:world', not found
+--   Package 'gtk+-x11-3.0', required by 'virtual:world', not found
+-- Configuring juceaide
+-- Building juceaide
+-- Exporting juceaide
+-- Testing juceaide
+-- Finished setting up juceaide
+-- Configuring done (10.8s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/lens-work/build-identity
+[  4%] Building CXX object CMakeFiles/ayra_identity_input_tests.dir/mnt/data/lens-work/Lab/tests/NativePanelTests.cpp.o
+[  8%] Building CXX object CMakeFiles/ayra_identity_tests.dir/IdentityTests.cpp.o
+[ 12%] Building CXX object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/JUCE/modules/juce_audio_basics/juce_audio_basics.cpp.o
+[ 16%] Building CXX object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/JUCE/modules/juce_core/juce_core.cpp.o
+[ 20%] Building CXX object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/JUCE/modules/juce_core/juce_core_CompilationTime.cpp.o
+[ 25%] Building CXX object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/JUCE/modules/juce_data_structures/juce_data_structures.cpp.o
+[ 29%] Linking CXX executable ayra_identity_input_tests
+[ 33%] Building CXX object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/JUCE/modules/juce_events/juce_events.cpp.o
+[ 66%] Built target ayra_identity_input_tests
+[ 70%] Building CXX object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics.cpp.o
+[ 75%] Building CXX object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics_Harfbuzz.cpp.o
+[ 79%] Building C object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/JUCE/modules/juce_graphics/juce_graphics_Sheenbidi.c.o
+[ 83%] Building CXX object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/JUCE/modules/juce_gui_basics/juce_gui_basics.cpp.o
+[ 87%] Building CXX object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/JUCE/modules/juce_gui_extra/juce_gui_extra.cpp.o
+[ 91%] Building CXX object CMakeFiles/ayra_identity_tests.dir/mnt/data/lens-work/Lab/ayra_ui/ayra_ui.cpp.o
+[ 95%] Building CXX object CMakeFiles/ayra_identity_tests.dir/generated/MultiverseButtons.cpp.o
+[100%] Linking CXX executable ayra_identity_tests
+[100%] Built target ayra_identity_tests
+Internal ctest changing into directory: /mnt/data/lens-work/build-identity
+Test project /mnt/data/lens-work/build-identity
+    Start 1: visual_adapter_contracts
+1/3 Test #1: visual_adapter_contracts .........   Passed    0.71 sec
+    Start 2: identity_visual_contracts
+2/3 Test #2: identity_visual_contracts ........   Passed    3.97 sec
+    Start 3: identity_input_contracts
+3/3 Test #3: identity_input_contracts .........   Passed    3.41 sec
+
+100% tests passed, 0 tests failed out of 3
+
+Total Test time (real) =   8.09 sec

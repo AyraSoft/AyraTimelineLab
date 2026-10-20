@@ -1,3 +1,7 @@
+> Historical identity/rename revision. The approved HTML lens and passive
+> hover policy now live in `docs/FROSTED_LENS.md`; current execution evidence
+> is in `verification/frosted-lens/STATUS.md`. Visual-source wiring is retained.
+
 # Identità flottante e sorgenti visuali
 
 ## Il problema corretto
