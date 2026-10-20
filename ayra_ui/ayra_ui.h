@@ -1,5 +1,6 @@
 #pragma once
 #define JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED 1
+#include "ayra_VisualSource.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 #ifndef AYRA_COMMON_WITH_MULTIVERSE
@@ -10,26 +11,26 @@
 #include "melatonin_blur/melatonin_blur.h"
 
 // Tokens (Colours, Geometry, Typography, Tokens)
-#include "tokens/ayra_Tokens_Colours.h"
-#include "tokens/ayra_Tokens_Geometry.h"
-#include "tokens/ayra_Tokens_Typography.h"
-#include "tokens/ayra_Tokens.h"
+#include AYRA_LAB_LAF_FILE(tokens/ayra_Tokens_Colours.h)
+#include AYRA_LAB_LAF_FILE(tokens/ayra_Tokens_Geometry.h)
+#include AYRA_LAB_LAF_FILE(tokens/ayra_Tokens_Typography.h)
+#include AYRA_LAB_LAF_FILE(tokens/ayra_Tokens.h)
 
 // Glyphs
-#include "glyphs/ayra_Glyph.h"
-#include "glyphs/ayra_TransportGlyphs.h"
-#include "glyphs/ayra_StateGlyphs.h"
-#include "glyphs/ayra_FileGlyphs.h"
-#include "glyphs/ayra_LayoutGlyphs.h"
-#include "glyphs/ayra_LogoGlyphs.h"
-#include "glyphs/ayra_ControlGlyphs.h"
-#include "glyphs/ayra_SystemGlyphs.h"
-#include "glyphs/ayra_Glyphs.h"
-#include "glyphs/ayra_DeviceGlyphs.h"
-#include "glyphs/ayra_SnapshotGlyphs.h"
-#include "glyphs/ayra_CommandGlyphs.h"
-#include "glyphs/ayra_ActionGlyphs.h"
-#include "glyphs/ayra_GlyphHandles.h"
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_Glyph.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_TransportGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_StateGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_FileGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_LayoutGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_LogoGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_ControlGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_SystemGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_Glyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_DeviceGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_SnapshotGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_CommandGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_ActionGlyphs.h)
+#include AYRA_LAB_LAF_FILE(glyphs/ayra_GlyphHandles.h)
 
 // Legacy Node Palette & Fonts
 #include "legacy/ayra_NodePalette.h"
@@ -41,8 +42,8 @@
 #include "identifiers/ayra_SharedIdentifiers.h"
 
 // Chrome Primitives
-#include "ayra_NodeButtons.h"
-#include "ayra_ChromePrimitives.h"
+#include AYRA_LAB_LAF_FILE(ayra_NodeButtons.h)
+#include AYRA_LAB_LAF_FILE(ayra_ChromePrimitives.h)
 
 // Canonical Strip Fader Geometry for Mixer LookAndFeel
 struct StripFaderGeometry
@@ -71,7 +72,7 @@ struct StripFaderGeometry
 #include "ayra_CommonDefaultLookAndFeel.h"
 
 // Controls / Widgets (decoupled standalone controls)
-#include "controls/shape_icon_button/ayra_ShapeIconButton.h"
-#include "controls/add_button/ayra_AddButton.h"
-#include "controls/tab_strip/ayra_TabStrip.h"
-#include "controls/drag_value_field/ayra_DragValueField.h"
+#include AYRA_LAB_CONTROL_FILE(shape_icon_button/ayra_ShapeIconButton.h)
+#include AYRA_LAB_CONTROL_FILE(add_button/ayra_AddButton.h)
+#include AYRA_LAB_CONTROL_FILE(tab_strip/ayra_TabStrip.h)
+#include AYRA_LAB_CONTROL_FILE(drag_value_field/ayra_DragValueField.h)

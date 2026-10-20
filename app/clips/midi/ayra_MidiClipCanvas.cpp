@@ -161,6 +161,22 @@ class MidiClipCanvas final : public juce::Component,
                              public clips::MidiClipPresentationProvider,
                              private juce::Timer {
 public:
+  CanvasViewportBinding panelView;
+
+  std::shared_ptr<void> capturePanelState() const
+  {
+      using State = std::tuple<decltype(uiStates)>;
+      return std::make_shared<State>(uiStates);
+  }
+  void restorePanelState(const std::shared_ptr<void>& state)
+  {
+      if(!state)return;
+      using State = std::tuple<decltype(uiStates)>;
+      const auto& saved=*std::static_pointer_cast<State>(state);
+      uiStates=std::get<0>(saved);
+  }
+
+
   explicit MidiClipCanvas(LabComponent &h) : host(h) {
     clipFeatures.gainEnabled = false;
     setWantsKeyboardFocus(true);
@@ -171,7 +187,7 @@ public:
     marqueeSelector.onPerformMarqueeSelection =
         [this](const juce::Rectangle<int> &area,
                ayra::MarqueeSelector::ModifierMode mode) {
-          const auto pps = getWidth() / 32.0;
+          const auto pps = panelView.pixelsPerSecond(getWidth());
           bool anyChanged = false;
 
           for (const auto &c : data.clips) {
@@ -324,7 +340,7 @@ public:
       return "Intestazione Clip MIDI\nTrascina per spostare la clip; doppio "
              "click cambia livello di zoom";
     default:
-      if (isHoveringDivider)
+      if (!panelView.enabled && isHoveringDivider)
         return "Separatore Traccia\nTrascina verticalmente per ridimensionare "
                "l'altezza";
       if (!hoveredClipId.empty())
@@ -337,6 +353,9 @@ public:
 
   void mouseWheelMove(const juce::MouseEvent &e,
                       const juce::MouseWheelDetails &wheel) override {
+        if(panelView.enabled && (e.mods.isCommandDown()||e.mods.isCtrlDown()||e.mods.isShiftDown()))
+        { Component::mouseWheelMove(e,wheel);return; }
+
     if (e.mods.isAltDown() || e.mods.isCommandDown() || e.mods.isCtrlDown() ||
         e.mods.isShiftDown()) {
       const float delta =
@@ -792,7 +811,7 @@ public:
     }
 
     for (auto i = uiStates.begin(); i != uiStates.end();)
-      if (!live.contains(i->first))
+      if (!live.contains(i->first) && (!panelView.enabled || !panelView.containsCanonicalClip(i->first)))
         i = uiStates.erase(i);
       else
         ++i;
@@ -850,16 +869,16 @@ public:
     const float bottomMargin = clipFeatures.cutEnabled ? 14.0f : 4.0f;
     const float bodyHeight = juce::jmax(10.0f, static_cast<float>(height) -
                                                    (topMargin + bottomMargin));
-    return {static_cast<float>(c.start * pps), topMargin,
+    return {static_cast<float>(panelView.timeToX(c.start,getWidth())), topMargin,
             static_cast<float>(c.length * pps), bodyHeight};
   }
 
   void resized() override { layoutClipComponents(); }
 
   void paint(juce::Graphics &g) override {
-    const auto pps = getWidth() / 32.0;
+    const auto pps = panelView.pixelsPerSecond(getWidth());
     auto &laf = host.look();
-    laf.drawTrackGrid(g, getLocalBounds(), pps);
+    panelView.paintGrid(g,laf,getLocalBounds(),pps);
 
     if (data.clips.empty()) {
       g.setColour(laf.colours().secondary);
@@ -872,7 +891,7 @@ public:
   void paintOverChildren(juce::Graphics &g) override {
     if (loopPreview.active && loopPreview.duplicateCount > 0 &&
         !draggedClipId.empty()) {
-      const auto pps = getWidth() / 32.0;
+      const auto pps = panelView.pixelsPerSecond(getWidth());
       const Clip *cl = nullptr;
       for (const auto &c : data.clips)
         if (c.id == draggedClipId) {
@@ -1124,7 +1143,7 @@ private:
     if (getWidth() <= 0)
       return;
 
-    const auto pixelsPerSecond = getWidth() / 32.0;
+    const auto pixelsPerSecond = panelView.pixelsPerSecond(getWidth());
     const float topOverflow = clipFeatures.warpEnabled ? 8.0f : 0.0f;
     const float bottomOverflow = clipFeatures.cutEnabled ? 6.0f : 0.0f;
 
@@ -1154,7 +1173,7 @@ private:
 
   HitResult hitTestZones(juce::Point<float> p) const {
     HitResult res;
-    const auto pps = getWidth() / 32.0;
+    const auto pps = panelView.pixelsPerSecond(getWidth());
     const bool isDraggingWarp = (activeZone == TimelineClipZone::warpMarker ||
                                  activeZone == TimelineClipZone::topWarpRail);
     const bool isDraggingEnv = false;
@@ -1302,7 +1321,7 @@ private:
 
   void mouseMove(const juce::MouseEvent &e) override {
     mousePos = e.position;
-    const auto pps = getWidth() / 32.0;
+    const auto pps = panelView.pixelsPerSecond(getWidth());
     const auto now = juce::Time::getMillisecondCounter();
 
     for (const auto &c : data.clips) {
@@ -1373,7 +1392,7 @@ private:
       hoveredNoteIdx = -1;
       hoveredPcIdx = -1;
 
-      isHoveringDivider = (e.position.y >= getHeight() - 6.0f);
+      isHoveringDivider = !panelView.enabled && (e.position.y >= getHeight() - 6.0f);
       setMouseCursor(isHoveringDivider ? juce::MouseCursor::UpDownResizeCursor
                                        : juce::MouseCursor::NormalCursor);
     }
@@ -1432,7 +1451,7 @@ private:
           data.id, hit.clip->id, clips::TimelinePointerTarget::clip,
           clips::ClipKind::midiNote, clips::semanticClipZone(hit.zone),
           e.position,
-          clips::timelineSecondsFromCanvasX(e.position.x, getWidth()), e.mods);
+          panelView.xToTime(e.position.x,getWidth()), e.mods);
       context.markerIndex = hit.markerIdx;
       context.pointIndex = hit.envelopeIdx;
       context.segmentIndex = hit.curveSegmentIdx;
@@ -1658,8 +1677,8 @@ private:
     // Click su Bottom Cut Rail: taglia la clip MIDI con CC Chase e divisione
     // note
     if (dragZone == TimelineClipZone::bottomCutRail) {
-      const auto pps = getWidth() / 32.0;
-      const double splitTime = e.position.x / pps;
+      const auto pps = panelView.pixelsPerSecond(getWidth());
+      const double splitTime = panelView.xToTime(e.position.x,getWidth());
       constexpr double minimumSegmentLength = 0.2;
       std::vector<std::pair<std::string, float>> clipsToSplit;
       for (const auto &candidate : data.clips) {
@@ -1740,7 +1759,7 @@ private:
     }
 
     auto &ui = uiStates[draggedClipId];
-    const auto pps = getWidth() / 32.0;
+    const auto pps = panelView.pixelsPerSecond(getWidth());
     Clip *cl = nullptr;
     for (auto &c : data.clips)
       if (c.id == draggedClipId) {
@@ -2293,7 +2312,7 @@ private:
         !draggedClipId.empty()) {
       if (uiStates.contains(draggedClipId)) {
         auto &ui = uiStates[draggedClipId];
-        const auto pps = getWidth() / 32.0;
+        const auto pps = panelView.pixelsPerSecond(getWidth());
         const Clip *cl = nullptr;
         for (const auto &c : data.clips)
           if (c.id == draggedClipId) {
@@ -2404,7 +2423,7 @@ private:
       return;
     }
 
-    if (e.position.y >= getHeight() - 6.0f) {
+    if (!panelView.enabled && e.position.y >= getHeight() - 6.0f) {
       const int modelHeight = clip_height_law::nextModelHeight(
           static_cast<float>(height), host.getVerticalZoom());
       host.store().resize(data.id, modelHeight);

@@ -1,0 +1,2 @@
+PASS: reversing only the class qualifier and one include reproduces ApplicationLookAndFeel_Buttons.cpp exactly.
+Git blob: 57a52c29f41dd463d758a2fd6ded62aeec8affc2

@@ -154,6 +154,29 @@ class ImageClipCanvas final : public juce::Component,
                               public juce::TooltipClient,
                               public clips::ImageClipPresentationProvider {
 public:
+  CanvasViewportBinding panelView;
+
+  void includePanelPartners(std::set<std::string>& visible)const
+  {
+      bool changed=true;
+      while(changed){changed=false;for(const auto& pair:xfadePairs)
+          if(visible.contains(pair.first)||visible.contains(pair.second))
+          {changed|=visible.insert(pair.first).second;changed|=visible.insert(pair.second).second;}}
+  }
+  std::shared_ptr<void> capturePanelState() const
+  {
+      using State = std::tuple<decltype(uiStates),decltype(xfadePairs)>;
+      return std::make_shared<State>(uiStates,xfadePairs);
+  }
+  void restorePanelState(const std::shared_ptr<void>& state)
+  {
+      if(!state)return;
+      using State = std::tuple<decltype(uiStates),decltype(xfadePairs)>;
+      const auto& saved=*std::static_pointer_cast<State>(state);
+      uiStates=std::get<0>(saved); xfadePairs=std::get<1>(saved);
+  }
+
+
   // Crossfade Compensation Solver per ImageClip
   ImageCrossfadeSolver crossfadeSolver;
 
@@ -357,7 +380,7 @@ public:
     marqueeSelector.onPerformMarqueeSelection =
         [this](const juce::Rectangle<int> &area,
                ayra::MarqueeSelector::ModifierMode mode) {
-          const auto pps = getWidth() / 32.0;
+          const auto pps = panelView.pixelsPerSecond(getWidth());
           bool anyChanged = false;
 
           for (const auto &c : data.clips) {
@@ -463,7 +486,7 @@ public:
       return "Intestazione Clip Immagini\nTrascina per spostare la clip sulla "
              "timeline; Doppio click per ciclare i 3 livelli di zoom";
     default:
-      if (isHoveringDivider)
+      if (!panelView.enabled && isHoveringDivider)
         return "Separatore Traccia\nTrascina verticalmente per ridimensionare "
                "l'altezza (sotto 46px mostra solo i fotogrammi)";
       if (!hoveredClipId.empty())
@@ -476,6 +499,9 @@ public:
 
   void mouseWheelMove(const juce::MouseEvent &e,
                       const juce::MouseWheelDetails &wheel) override {
+        if(panelView.enabled && (e.mods.isCommandDown()||e.mods.isCtrlDown()||e.mods.isShiftDown()))
+        { Component::mouseWheelMove(e,wheel);return; }
+
     if (e.mods.isAltDown() || e.mods.isCommandDown() || e.mods.isCtrlDown() ||
         e.mods.isShiftDown()) {
       const float delta =
@@ -547,7 +573,7 @@ public:
   void rebuildFilmstripCache(const Clip &c, ImageClipUIState &ui) {
     ui.cachedFrames.clear();
 
-    const double pps = std::max(1.0, getWidth() / 32.0);
+    const double pps = std::max(1.0, panelView.pixelsPerSecond(getWidth()));
     const auto b = clipBounds(c, pps);
     const float clipW = std::max(8.0f, b.getWidth());
     const float clipH = std::max(12.0f, b.getHeight());
@@ -727,7 +753,7 @@ public:
     }
 
     for (auto i = uiStates.begin(); i != uiStates.end();)
-      if (!live.contains(i->first))
+      if (!live.contains(i->first) && (!panelView.enabled || !panelView.containsCanonicalClip(i->first)))
         i = uiStates.erase(i);
       else
         ++i;
@@ -778,7 +804,7 @@ public:
     const float bottomMargin = clipFeatures.cutEnabled ? 14.0f : 4.0f;
     const float bodyHeight = juce::jmax(10.0f, static_cast<float>(height) -
                                                    (topMargin + bottomMargin));
-    return {static_cast<float>(c.start * pps), topMargin,
+    return {static_cast<float>(panelView.timeToX(c.start,getWidth())), topMargin,
             static_cast<float>(c.length * pps), bodyHeight};
   }
 
@@ -790,9 +816,9 @@ public:
   }
 
   void paint(juce::Graphics &g) override {
-    const auto pps = getWidth() / 32.0;
+    const auto pps = panelView.pixelsPerSecond(getWidth());
     auto &laf = host.look();
-    laf.drawTrackGrid(g, getLocalBounds(), pps);
+    panelView.paintGrid(g,laf,getLocalBounds(),pps);
 
     if (data.clips.empty()) {
       g.setColour(laf.colours().secondary);
@@ -805,7 +831,7 @@ public:
   void paintOverChildren(juce::Graphics &g) override {
     if (loopPreview.active && loopPreview.duplicateCount > 0 &&
         !draggedClipId.empty()) {
-      const auto pps = getWidth() / 32.0;
+      const auto pps = panelView.pixelsPerSecond(getWidth());
       const Clip *cl = nullptr;
       for (const auto &c : data.clips)
         if (c.id == draggedClipId) {
@@ -989,6 +1015,10 @@ private:
     }
 
     for (const auto &oldPair : xfadePairs) {
+      // Offscreen is not deletion: keep the relation and endpoint state.
+      if(panelView.enabled&&panelView.containsCanonicalClip(oldPair.first)&&panelView.containsCanonicalClip(oldPair.second)
+         &&(findClip(oldPair.first)==nullptr||findClip(oldPair.second)==nullptr))
+      {validPairs.insert(oldPair);continue;}
       if (!validPairs.contains(oldPair)) {
         if (uiStates.contains(oldPair.first) &&
             !uiStates[oldPair.first].opacityPoints.empty())
@@ -1201,7 +1231,7 @@ private:
     if (getWidth() <= 0)
       return;
 
-    const auto pixelsPerSecond = getWidth() / 32.0;
+    const auto pixelsPerSecond = panelView.pixelsPerSecond(getWidth());
     const float topOverflow = clipFeatures.warpEnabled ? 8.0f : 0.0f;
     const float bottomOverflow = clipFeatures.cutEnabled ? 6.0f : 0.0f;
 
@@ -1230,7 +1260,7 @@ private:
 
   HitResult hitTestZones(juce::Point<float> p) const {
     HitResult res;
-    const auto pps = getWidth() / 32.0;
+    const auto pps = panelView.pixelsPerSecond(getWidth());
     const bool isDraggingWarp = (activeZone == TimelineClipZone::warpMarker ||
                                  activeZone == TimelineClipZone::topWarpRail);
     const bool isDraggingOpacity =
@@ -1512,7 +1542,7 @@ private:
       hoveredMarkerIdx = -1;
       hoveredOpacityIdx = -1;
       hoveredCurveSegmentIdx = -1;
-      isHoveringDivider = (e.position.y >= getHeight() - 6.0f);
+      isHoveringDivider = !panelView.enabled && (e.position.y >= getHeight() - 6.0f);
       setMouseCursor(isHoveringDivider ? juce::MouseCursor::UpDownResizeCursor
                                        : juce::MouseCursor::NormalCursor);
     }
@@ -1559,7 +1589,7 @@ private:
           data.id, hit.clip->id, clips::TimelinePointerTarget::clip,
           clips::ClipKind::imageSequence, clips::semanticClipZone(hit.zone),
           e.position,
-          clips::timelineSecondsFromCanvasX(e.position.x, getWidth()), e.mods);
+          panelView.xToTime(e.position.x,getWidth()), e.mods);
       context.markerIndex = hit.markerIdx;
       context.pointIndex = hit.opacityIdx;
       context.segmentIndex = hit.curveSegmentIdx;
@@ -1702,8 +1732,8 @@ private:
 
     // Click su Bottom Scissor Cut Rail: divide la clip immagini
     if (dragZone == TimelineClipZone::bottomCutRail) {
-      const auto pps = getWidth() / 32.0;
-      const double splitTime = e.position.x / pps;
+      const auto pps = panelView.pixelsPerSecond(getWidth());
+      const double splitTime = panelView.xToTime(e.position.x,getWidth());
       constexpr double minimumSegmentLength = 0.2;
       std::vector<std::pair<std::string, float>> clipsToSplit;
       for (const auto &candidate : data.clips) {
@@ -1791,7 +1821,7 @@ private:
     }
 
     auto &ui = uiStates[draggedClipId];
-    const auto pps = getWidth() / 32.0;
+    const auto pps = panelView.pixelsPerSecond(getWidth());
     Clip *cl = nullptr;
     for (auto &c : data.clips)
       if (c.id == draggedClipId) {
@@ -2371,7 +2401,7 @@ private:
     }
 
     // Se doppio click sul divisore inferiore della traccia
-    if (e.position.y >= getHeight() - 6.0f) {
+    if (!panelView.enabled && e.position.y >= getHeight() - 6.0f) {
       const int modelHeight = clip_height_law::nextModelHeight(
           static_cast<float>(height), host.getVerticalZoom());
       host.store().resize(data.id, modelHeight);
@@ -2383,7 +2413,7 @@ private:
     auto &ui = uiStates[hit.clip->id];
 
     const double clickSec =
-        clips::timelineSecondsFromCanvasX(e.position.x, getWidth());
+        panelView.xToTime(e.position.x,getWidth());
     const auto ovInfo = findOverlapAtTime(clickSec, hit.clip->id);
     if (ovInfo.inOverlap && (hit.zone == TimelineClipZone::none ||
                              hit.zone == TimelineClipZone::clipBody)) {

@@ -1,0 +1,135 @@
+/** Native component-level contracts. Runs the actual TimelinePanel with a small
+    instrumented CanvasFactory; no media/DSP or fabricated application timings. */
+#include "../modules/ayra_timeline_panel/TimelinePanel.h"
+#include <cstdlib>
+#include <iostream>
+#include <map>
+#include <chrono>
+using namespace ayra::timeline_panel;
+namespace {
+int checks=0;
+void check(bool value,const char* expression,int line)
+{++checks;if(!value){std::cerr<<"FAIL "<<line<<" "<<expression<<'\n';std::exit(1);}}
+#define CHECK(...) check(static_cast<bool>((__VA_ARGS__)),#__VA_ARGS__,__LINE__)
+struct Record {int down=0,drag=0,up=0,doubled=0,wheel=0,binds=0,saved=0;CanvasFrame frame;};
+class MockCanvas final:public juce::Component
+{
+public:
+    explicit MockCanvas(Record& r):record(r){}
+    void mouseDown(const juce::MouseEvent&)override{++record.down;}
+    void mouseDrag(const juce::MouseEvent&)override{++record.drag;}
+    void mouseUp(const juce::MouseEvent&)override{++record.up;}
+    void mouseDoubleClick(const juce::MouseEvent&)override{++record.doubled;}
+    void mouseWheelMove(const juce::MouseEvent&,const juce::MouseWheelDetails&)override{++record.wheel;}
+    Record& record;
+};
+class TestArtwork final:public TimelinePanelLookAndFeel
+{
+public:
+    mutable int identitiesPrepared=0;
+    juce::Image prepareIdentity(const TimelineIdentityContent&,const TimelineIdentityLayout&)const override
+    {++identitiesPrepared;return {};}
+    std::unique_ptr<juce::Button> makeButton(LaneButton)override{return std::make_unique<juce::TextButton>();}
+    void drawAccent(juce::Graphics&,juce::Rectangle<float>,juce::Colour)const override{}
+    void drawMeter(juce::Graphics&,juce::Rectangle<float>,float)const override{}
+};
+juce::Component* find(juce::Component& root,const juce::String& id)
+{
+    if(root.getComponentID()==id)return &root;
+    for(auto* c:root.getChildren())if(auto* result=find(*c,id))return result;
+    return nullptr;
+}
+juce::MouseEvent event(juce::Component& target,juce::Point<float> position,int clicks=1,
+                       juce::ModifierKeys modifiers=juce::ModifierKeys::leftButtonModifier,
+                       juce::Point<float> start={-1,-1},bool drag=false)
+{
+    if(start.x<0)start=position;
+    return {juce::Desktop::getInstance().getMainMouseSource(),position,modifiers,
+            1.0f,0.0f,0.0f,0.0f,0.0f,&target,&target,juce::Time::getCurrentTime(),
+            start,juce::Time::getCurrentTime(),clicks,drag};
+}
+void pump(){juce::MessageManager::getInstance()->runDispatchLoopUntil(10);}
+Snapshot fixture(int count)
+{
+    Snapshot s;s.session="native-test";s.revision=1;
+    s.owners={{"owner",{},"Shared Tensor"},{"global",{},"Globals",0xff888888,OwnerRole::global,false,false,Monitoring::automatic,{false,false,false,false}}};
+    Lane global{"global-lane","global",{},"Metrica",Stream::global,VisualKind::point,24,16,24,true};
+    global.heightPolicy=HeightPolicy::compact;s.lanes.push_back(global);
+    for(int i=0;i<count;++i){Lane lane{std::to_string(i),"owner",{},"Lane "+std::to_string(i),i%2?Stream::midi:Stream::audio,VisualKind::audio,96,32,1200};
+        lane.inputMeterCount=2;lane.outputMeterCount=2;s.lanes.push_back(lane);
+        s.events.push_back({{lane.id,"clip"+lane.id},static_cast<double>(i),static_cast<double>(i)+2});}
+    return s;
+}
+}
+int main()
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    Controller controller;CHECK(controller.adopt(fixture(10000)));CHECK(controller.setMode(Mode::freeLanes));
+    std::map<Id,Record> records;TestArtwork artwork;Command received;
+    controller.onCommand=[&](const Command& c){received=c;return Result{};};
+    TimelinePanel panel(controller,[&](const Lane& lane){
+        LaneCanvas c;auto& record=records[lane.id];c.component=std::make_unique<MockCanvas>(record);
+        c.bind=[&record](const Lane&,const CanvasFrame& frame){++record.binds;record.frame=frame;};
+        c.saveState=[&record]{++record.saved;};c.preferredHeight=[](int){return 75;};return c;
+    },artwork);
+    panel.setSize(900,650);panel.addToDesktop(juce::ComponentPeer::windowIsTemporary);
+    panel.setVisible(true);panel.refresh();pump();
+    CHECK(controller.totalHeight()==24+10000*96);
+    CHECK(panel.getVisibleRowCount()<12);CHECK(panel.getResidentRowCount()<18);
+    auto* canvas=find(panel,"canvas:0");CHECK(canvas);CHECK(canvas->getWidth()<900);CHECK(canvas->getHeight()==96);
+    auto* row=find(panel,"lane:0");CHECK(row);CHECK(row->getHeight()==96);
+    auto* globalResize=find(panel,"resize:global-lane");CHECK(globalResize&&!globalResize->isVisible());
+    auto* global=find(panel,"lane:global-lane");CHECK(global->getHeight()==24);
+    const auto created=panel.getCreatedRowCount();const auto binds=records["0"].binds;
+    for(int i=0;i<100;++i)panel.refresh();CHECK(panel.getCreatedRowCount()==created);CHECK(records["0"].binds==binds);
+    const auto identityCount=artwork.identitiesPrepared;
+    panel.setViewStart(50);CHECK(artwork.identitiesPrepared==identityCount);
+    panel.setViewStart(0);CHECK(artwork.identitiesPrepared==identityCount);
+    const auto selectedBefore=controller.view().selectedLanes;
+    auto* name=find(panel,"name:0");CHECK(name&&name->isVisible());
+    auto e=event(*name,{2.0f,2.0f});name->mouseDown(e);name->mouseDrag(event(*name,{8.0f,3.0f},1,juce::ModifierKeys::leftButtonModifier,{2,2},true));name->mouseUp(e);
+    CHECK(records["0"].down==1&&records["0"].drag==1&&records["0"].up==1);CHECK(controller.view().selectedLanes==selectedBefore);
+    juce::MouseWheelDetails wheel{};wheel.deltaY=0.1f;name->mouseWheelMove(e,wheel);CHECK(records["0"].wheel==1);
+    name->mouseDown(event(*name,{2,2},2));name->mouseDoubleClick(event(*name,{2,2},2));name->mouseUp(event(*name,{2,2},2));
+    CHECK(records["0"].down==1&&records["0"].up==1&&records["0"].doubled==0);
+    auto* editor=dynamic_cast<juce::TextEditor*>(find(panel,"rename:0"));CHECK(editor&&editor->isVisible());
+    editor->setText("Renamed",false);editor->onReturnKey();pump();
+    CHECK(received.kind==CommandKind::renameOwner&&received.owner=="owner"&&received.label=="Renamed");
+    CHECK(!editor->isVisible());
+    auto* detail=find(panel,"lane-name:0");CHECK(detail&&detail->isVisible());
+    detail->mouseDown(event(*detail,{2,2},2));editor->setText("Lane alias",false);editor->onReturnKey();pump();
+    CHECK(received.kind==CommandKind::renameLane&&received.lane=="0"&&received.label=="Lane alias");
+    const auto* compactName=find(panel,"name:global-lane");CHECK(compactName&&compactName->getHeight()<=24);
+    auto* resize=find(panel,"resize:0");CHECK(resize&&resize->isVisible());
+    auto* hit=panel.getComponentAt(panel.getLocalPoint(resize,juce::Point<int>{3,1}));CHECK(hit==resize);
+    resize->mouseDown(event(*resize,{3,1}));CHECK(controller.resizing());
+    resize->mouseDrag(event(*resize,{3,31},1,juce::ModifierKeys::leftButtonModifier,{3,1},true));CHECK(controller.height("0")==126);
+    resize->mouseUp(event(*resize,{3,31}));CHECK(!controller.resizing());CHECK(controller.undoView());CHECK(controller.height("0")==96);panel.refresh();
+    auto settings=controller.view().chrome;settings.navigation=false;settings.mute=false;settings.solo=false;settings.open=false;settings.monitoring=false;
+    panel.setChrome(settings);canvas=find(panel,"canvas:0");const int fullWidth=canvas->getWidth();
+    const double screenXBefore=canvas->getX()+records["0"].frame.time.timeToX(5);
+    settings.inputMeters=true;settings.outputMeters=true;panel.setChrome(settings);canvas=find(panel,"canvas:0");
+    CHECK(canvas->getWidth()<fullWidth);CHECK(records["0"].frame.time.timeToX(0)>=0);
+    CHECK(canvas->getX()+records["0"].frame.time.timeToX(5)==find(panel,"canvas:1")->getX()+records["1"].frame.time.timeToX(5));
+    juce::ignoreUnused(screenXBefore);
+    CHECK(find(panel,"canvas:1")->getWidth()==canvas->getWidth()); // MIDI meters permitted.
+    settings.nameSide=presentation::TimelineNameSide::left;settings.accentSide=presentation::TimelineAccentSide::both;panel.setChrome(settings);
+    CHECK(find(panel,"name:0")->getX()<200);
+    row=find(panel,"lane:0");row->mouseDown(event(*row,{1,20}));row->mouseUp(event(*row,{1,20}));CHECK(controller.view().selectedLanes.contains("0"));
+    auto* row1=find(panel,"lane:1");auto ctrl=juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier|juce::ModifierKeys::ctrlModifier);
+    row1->mouseDown(event(*row1,{row1->getWidth()-2.0f,20},1,ctrl));row1->mouseUp(event(*row1,{row1->getWidth()-2.0f,20},1,ctrl));
+    CHECK(controller.view().selectedLanes.contains("0")&&controller.view().selectedLanes.contains("1"));
+    // Visibility removes only presentation height, retains identities/selection invariants.
+    const double oldTotal=controller.totalHeight();CHECK(controller.setLaneVisible("0",false));panel.refresh();CHECK(controller.totalHeight()==oldTotal-96);
+    CHECK(controller.setLaneVisible("0",true));panel.refresh();
+    panel.setViewStart(100000);canvas=find(panel,"canvas:0");CHECK(canvas->getWidth()<900);CHECK(records["0"].frame.time.startSeconds==100000);
+    std::size_t maximum=0;
+    for(int i=0;i<300;++i){panel.setVerticalPosition(i*2301);maximum=std::max(maximum,panel.getResidentRowCount());CHECK(panel.getResidentRowCount()<=panel.getVisibleRowCount()+6);}
+    CHECK(maximum<20);CHECK(records["0"].saved>0);panel.setVerticalPosition(0);CHECK(find(panel,"canvas:0"));
+    auto modified=controller.snapshot();++modified.revision;modified.lanes[3].heightPolicy=HeightPolicy::automatic;
+    CHECK(controller.adopt(modified));panel.refresh();pump();CHECK(controller.height("2")==75);CHECK(!controller.beginResize("2"));
+    const auto previousMade=panel.getCreatedRowCount();modified.lanes[1].visual=VisualKind::midi;++modified.revision;
+    CHECK(controller.adopt(modified));panel.refresh();CHECK(panel.getCreatedRowCount()==previousMade+1);
+    panel.removeFromDesktop();
+    std::cout<<"PASS "<<checks<<" native component assertions; 10000 logical lanes; maximum resident rows "<<maximum<<"\n";
+}

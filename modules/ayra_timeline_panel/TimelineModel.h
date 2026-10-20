@@ -1,6 +1,7 @@
 #pragma once
 // Portable, message-thread presentation contracts. No JUCE, DSP, media or document writes.
 // Owner IDs, lane IDs and clip IDs are opaque canonical identities, never display indices.
+#include <ayra_timeline/ayra_timeline_presentation.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -23,6 +24,7 @@ enum class Stream { audio, midi, dmx, osc, image, parameter, text, global };
 enum class VisualKind { audio, midi, line, point, span, continuous, image };
 enum class OwnerRole { song, performer, track, convergence, songMain, global };
 enum class Monitoring { automatic, live, playback, merge };
+enum class HeightPolicy { manual, compact, automatic };
 enum class RelationKind { temporalGroup, clipLink };
 struct Capabilities
 {
@@ -48,6 +50,9 @@ struct Lane
     VisualKind visual = VisualKind::audio;
     int initialHeight = 176, minimumHeight = 64, maximumHeight = 1200;
     bool pinned = false;
+    HeightPolicy heightPolicy = HeightPolicy::manual;
+    bool navigation = true;
+    int inputMeterCount = 0, outputMeterCount = 0;
     bool operator==(const Lane&) const = default;
 };
 struct EventRef
@@ -124,7 +129,11 @@ inline Result validate(const Snapshot& s)
             return Result::fail("Unknown lane stream or visual kind");
         if (l.id.empty() || !lanes.emplace(l.id, &l).second || !owners.contains(l.owner))
             return Result::fail("Invalid lane identity or owner");
-        if (l.minimumHeight < 32 || l.maximumHeight > 10000 || l.minimumHeight > l.maximumHeight
+        if (!enumInRange(l.heightPolicy, HeightPolicy::automatic)
+            || l.inputMeterCount < 0 || l.inputMeterCount > 64
+            || l.outputMeterCount < 0 || l.outputMeterCount > 64)
+            return Result::fail("Invalid height policy or meter descriptor");
+        if (l.minimumHeight < 16 || l.maximumHeight > 10000 || l.minimumHeight > l.maximumHeight
             || l.initialHeight < l.minimumHeight || l.initialHeight > l.maximumHeight)
             return Result::fail("Invalid lane height limits");
     }
@@ -165,9 +174,10 @@ struct ViewState
 {
     Mode mode = Mode::structured;
     std::vector<Id> freeOrder, ownerOrder;
-    std::set<Id> collapsedOwners, selectedLanes;
+    std::set<Id> collapsedOwners, selectedLanes, hiddenLanes;
     std::map<Id, int> heights;
     std::vector<LayoutGroup> layoutGroups;
+    ayra::timeline::TimelineChromeVisibility chrome;
     Id activeLane, rangeAnchor;
     bool operator==(const ViewState&) const = default;
 };
@@ -180,7 +190,7 @@ struct Row
     double bottom() const noexcept { return top + height; }
 };
 enum class CommandKind { mute, solo, monitoring, openOwner, temporalGroup, dissolveGroup,
-                         linkClips, unlinkClips, moveClips, trimLeft, trimRight, deleteClips };
+                         linkClips, unlinkClips, moveClips, trimLeft, trimRight, deleteClips, renameLane, renameOwner };
 struct Command
 {
     CommandKind kind = CommandKind::openOwner;
@@ -190,6 +200,7 @@ struct Command
     Monitoring monitoring = Monitoring::automatic;
     std::vector<EventRef> events;
     double deltaSeconds = 0;
+    std::string label;
 };
 // Semantic requests, not GUI events. The host prepares/admit/publishes one transaction.
 using CommandSink = std::function<Result(const Command&)>;
@@ -197,11 +208,71 @@ using CommandSink = std::function<Result(const Command&)>;
 class Controller
 {
 public:
-    static constexpr double seamHeight = 24.0;
+    static constexpr double seamHeight = 0.0;
+    static constexpr double summaryHeight = 24.0;
     const Snapshot& snapshot() const noexcept { return model; }
     const ViewState& view() const noexcept { return state; }
-    const std::vector<Row>& rows() const noexcept { return layout; }
-    double totalHeight() const noexcept { return layout.empty() ? 0 : layout.back().bottom(); }
+    // Compatibility accessor for inspection/tests; the native viewport uses visitRows.
+    const std::vector<Row>& rows() const
+    {
+        if (offsetsDirty) {
+            for (std::size_t i=0;i<layout.size();++i) {
+                layout[i].top=static_cast<double>(rowIndex.top(i));
+                layout[i].height=rowIndex.height(i);
+            }
+            offsetsDirty=false;
+        }
+        return layout;
+    }
+    double totalHeight() const noexcept { return static_cast<double>(rowIndex.total()); }
+    const Row* rowForLane(const Id& id) const
+    {
+        const auto i=laneRowIndex.find(id);
+        return i==laneRowIndex.end()?nullptr:&layout[i->second];
+    }
+    double laneTop(const Id& id) const
+    {
+        const auto i=laneRowIndex.find(id);
+        return i==laneRowIndex.end()?0.0:static_cast<double>(rowIndex.top(i->second));
+    }
+    template<class Visitor> void visitRows(std::int64_t top, int extent, int overscan, Visitor&& visitor) const
+    {
+        rowIndex.visit(top,extent,overscan,[&](std::size_t i,std::int64_t y,int h){
+            auto row=layout[i];row.top=static_cast<double>(y);row.height=h;visitor(row);
+        });
+    }
+    std::uint64_t layoutGeneration() const noexcept { return layoutEpoch; }
+    bool setChrome(ayra::timeline::TimelineChromeVisibility chrome)
+    {
+        if (resize) return false;
+        auto next=state;next.chrome=chrome;return change(std::move(next));
+    }
+    bool setLaneVisible(const Id& id,bool visible)
+    {
+        const auto* l=lane(id);if(!l || l->pinned || resize)return false;
+        auto next=state;
+        if(visible)next.hiddenLanes.erase(id);else next.hiddenLanes.insert(id);
+        return change(std::move(next));
+    }
+    bool setAutoHeight(const Id& id,int pixels)
+    {
+        const auto* l=lane(id);if(!l || l->heightPolicy!=HeightPolicy::automatic)return false;
+        pixels=std::clamp(pixels,l->minimumHeight,l->maximumHeight);
+        if(height(id)==pixels)return false;
+        autoHeights[id]=pixels;updateIndexedHeight(id);return true;
+    }
+    Result renameOwner(const Id& id,std::string label)
+    {
+        if(!owner(id)||label.empty()||label.size()>256)return Result::fail("Invalid owner rename");
+        Command c;c.kind=CommandKind::renameOwner;c.owner=id;c.label=std::move(label);
+        return dispatch(std::move(c));
+    }
+    Result rename(const Id& id,std::string label)
+    {
+        if(!lane(id) || label.empty() || label.size()>256)return Result::fail("Invalid lane name");
+        Command c;c.kind=CommandKind::renameLane;c.lane=id;c.owner=lane(id)->owner;c.label=std::move(label);
+        return dispatch(std::move(c));
+    }
     bool resizing() const noexcept { return resize.has_value(); }
     CommandSink onCommand;
 
@@ -210,7 +281,7 @@ public:
         if (auto valid = validate(next); !valid) return valid;
         const bool newSession = next.session != model.session;
         if (!newSession && next.revision < model.revision) return Result::fail("Stale presentation revision");
-        if (newSession) { state = {}; history.clear(); future.clear(); resize.reset(); }
+        if (newSession) { state = {}; history.clear(); future.clear(); resize.reset(); autoHeights.clear(); }
         model = std::move(next);
         index(); reconcile(); rebuild();
         return {};
@@ -224,6 +295,10 @@ public:
     int height(const Id& id) const
     {
         const auto* l = lane(id); if (!l) return 0;
+        if(l->heightPolicy==HeightPolicy::compact)return l->initialHeight;
+        if(l->heightPolicy==HeightPolicy::automatic) {
+            const auto a=autoHeights.find(id);return a==autoHeights.end()?l->initialHeight:a->second;
+        }
         if (resize && resize->lane == id) return resize->preview;
         const auto i = state.heights.find(id);
         return i == state.heights.end() ? l->initialHeight : i->second;
@@ -245,7 +320,7 @@ public:
     {
         if (!lane(id)) return false;
         std::vector<Id> visible;
-        for (const auto& r : layout) if (!r.lane.empty()) visible.push_back(r.lane);
+        for (const auto& r : layout) if (!r.lane.empty() && !state.hiddenLanes.contains(r.lane)) visible.push_back(r.lane);
         auto at = std::find(visible.begin(), visible.end(), id);
         if (at == visible.end()) return false;
         auto anchor = std::find(visible.begin(), visible.end(), state.rangeAnchor);
@@ -340,7 +415,7 @@ public:
     }
     bool setHeight(const Id& id, int pixels)
     {
-        const auto* l = lane(id); if (!l || resize) return false;
+        const auto* l = lane(id); if (!l || resize || l->heightPolicy!=HeightPolicy::manual) return false;
         pixels = std::clamp(pixels, l->minimumHeight, l->maximumHeight);
         if (pixels == height(id)) return false;
         auto next = state; next.heights[id] = pixels; return change(std::move(next));
@@ -348,7 +423,7 @@ public:
     bool beginResize(const Id& id)
     {
         const auto* l = lane(id);
-        if (!l || resize) return false;
+        if (!l || resize || l->heightPolicy!=HeightPolicy::manual) return false;
         resize = Resize{id, height(id), height(id)}; return true;
     }
     bool updateResize(double delta)
@@ -357,7 +432,7 @@ public:
         const auto* l = lane(resize->lane); if (!l) { resize.reset(); return false; }
         resize->preview = static_cast<int>(std::clamp(std::round(resize->original + delta),
             static_cast<double>(l->minimumHeight), static_cast<double>(l->maximumHeight)));
-        rebuild(); return true;
+        updateIndexedHeight(resize->lane); return true;
     }
     bool endResize(bool commit)
     {
@@ -385,6 +460,7 @@ public:
     // Half-open viewport. O(log(rows) + visible) at the consumer; no full row scan.
     std::pair<std::size_t, std::size_t> visible(double top, double extent, double overscan = 0) const
     {
+        rows();
         if (!std::isfinite(top) || !std::isfinite(extent) || !std::isfinite(overscan) || extent <= 0)
             return {0, 0};
         overscan = std::max(0.0, overscan);
@@ -397,10 +473,11 @@ public:
     }
     std::optional<Id> resizeHit(double y, double tolerance = 4.0) const
     {
+        rows();
         if (!std::isfinite(y) || !std::isfinite(tolerance) || tolerance < 0) return {};
         const auto at = std::lower_bound(layout.begin(), layout.end(), y - tolerance,
             [](const Row& r, double edge) { return r.bottom() < edge; });
-        if (at != layout.end() && !at->lane.empty() && std::abs(at->bottom() - y) <= tolerance)
+        if (at != layout.end() && !at->lane.empty() && lane(at->lane)->heightPolicy==HeightPolicy::manual && std::abs(at->bottom() - y) <= tolerance)
             return at->lane;
         return {};
     }
@@ -491,7 +568,28 @@ private:
     Snapshot model;
     ViewState state;
     std::vector<ViewState> history, future;
-    std::vector<Row> layout;
+    mutable std::vector<Row> layout;
+    ayra::timeline::TimelineRowIndex rowIndex;
+    std::unordered_map<Id,std::size_t> laneRowIndex;
+    std::map<Id,int> autoHeights;
+    mutable bool offsetsDirty=false;
+    std::uint64_t layoutEpoch=0;
+    void updateIndexedHeight(const Id& id)
+    {
+        const auto i=laneRowIndex.find(id);if(i==laneRowIndex.end())return;
+        rowIndex.setHeight(i->second,state.hiddenLanes.contains(id)?0:height(id));
+        offsetsDirty=true;++layoutEpoch;
+    }
+    void finishLayout()
+    {
+        std::vector<int> heights;heights.reserve(layout.size());laneRowIndex.clear();
+        for(std::size_t i=0;i<layout.size();++i) {
+            const auto& r=layout[i];
+            if(!r.lane.empty())laneRowIndex[r.lane]=i;
+            heights.push_back(!r.lane.empty() && state.hiddenLanes.contains(r.lane)?0:static_cast<int>(r.height));
+        }
+        rowIndex.reset(heights);offsetsDirty=true;++layoutEpoch;
+    }
     std::optional<Resize> resize;
     std::unordered_map<Id, std::size_t> ownerIndex, laneIndex;
     std::map<EventRef, std::size_t> eventIndex;
@@ -530,6 +628,8 @@ private:
         cleanOrder(state.ownerOrder, model.owners, [&](const Id& id) { return owner(id) != nullptr; });
         std::erase_if(state.selectedLanes, [&](const Id& id) { return !lane(id); });
         std::erase_if(state.collapsedOwners, [&](const Id& id) { return !owner(id); });
+        std::erase_if(state.hiddenLanes, [&](const Id& id) { return !lane(id); });
+        std::erase_if(autoHeights, [&](const auto& p) { return !lane(p.first); });
         std::erase_if(state.heights, [&](const auto& pair) { return !lane(pair.first); });
         for (auto& [id, value] : state.heights)
             value = std::clamp(value, lane(id)->minimumHeight, lane(id)->maximumHeight);
@@ -560,7 +660,7 @@ private:
         if (state.mode == Mode::freeLanes)
         {
             for (const auto& id : state.freeOrder) if (const auto* l = lane(id); l && !l->pinned) addLane(*l, 0, true);
-            return;
+            finishLayout();return;
         }
         std::unordered_map<Id, std::vector<Id>> children;
         std::unordered_map<Id, std::vector<const Lane*>> ownerLanes;
@@ -583,8 +683,8 @@ private:
             const auto& lanes = ownerLanes[current.id];
             if (collapsed || lanes.empty())
             {
-                layout.push_back({"owner:" + current.id, current.id, {}, current.depth, y, seamHeight, true, true});
-                y += seamHeight;
+                layout.push_back({"owner:" + current.id, current.id, {}, current.depth, y, summaryHeight, true, true});
+                y += summaryHeight;
             }
             else
                 for (std::size_t i = 0; i < lanes.size(); ++i) addLane(*lanes[i], current.depth, i == 0);
@@ -603,13 +703,14 @@ private:
                     const auto* child = owner(entry.id);
                     if (child->role == OwnerRole::convergence || child->role == OwnerRole::songMain)
                     {
-                        layout.push_back({"owner:" + entry.id, entry.id, {}, entry.depth, y, seamHeight, true, true});
-                        y += seamHeight;
+                        layout.push_back({"owner:" + entry.id, entry.id, {}, entry.depth, y, summaryHeight, true, true});
+                        y += summaryHeight;
                     }
                     append(entry.id, entry.depth + 1);
                 }
             }
         }
+        finishLayout();
     }
 };
 } // namespace ayra::timeline_panel

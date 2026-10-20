@@ -51,7 +51,7 @@ inline panel::Snapshot panelSnapshot(const Session& session, std::uint64_t revis
     for (auto& lane:s.lanes)
         if (const auto* source=findTrack(session,lane.id))
         {
-            lane.initialHeight=std::clamp(source->height,lane.minimumHeight,lane.maximumHeight);
+            if(lane.heightPolicy==panel::HeightPolicy::manual)lane.initialHeight=std::clamp(source->height,lane.minimumHeight,lane.maximumHeight);
             for (const auto& clip:source->clips)
             {
                 panel::EventRef ref{lane.id,clip.id};
@@ -81,9 +81,11 @@ inline Session makePanelFixture()
     };
     using S=panel::Stream; using V=panel::VisualKind;
     m->lanes={
-        {"range","globals",{},"Range",S::global,V::span,64,48,1200,true},
+        {"range","globals",{},"Range",S::global,V::span,28,24,1200,true},
         {"tempo","globals",{},"Tempo",S::global,V::continuous,96,48,1200,true},
-        {"markers","globals",{},"Markers",S::global,V::point,64,48,1200,true},
+        {"markers","globals",{},"Markers",S::global,V::point,24,24,1200,true},
+        {"timesig","globals",{},"Metrica",S::global,V::point,24,24,1200,true},
+        {"counter","globals",{},"Counter",S::global,V::point,24,24,1200,true},
         {"backing.audio","backing","backing.bus","Audio",S::audio,V::audio},
         {"voice.audio","voice","voice.audio-bus","Audio",S::audio,V::audio},
         {"voice.midi","voice","voice.midi-bus","MIDI",S::midi,V::midi,256,96,1200},
@@ -99,6 +101,10 @@ inline Session makePanelFixture()
         {"lights.text","lights","lights.text-bus","Text draft",S::text,V::span,64,48,1200},
         {"song-main.audio","song-main","main.audio-bus","Audio",S::audio,V::audio}
     };
+    for(auto& lane:m->lanes) {
+        if(lane.stream==S::global&&lane.id!="tempo")lane.heightPolicy=panel::HeightPolicy::compact;
+        if(lane.stream!=S::global){lane.inputMeterCount=2;lane.outputMeterCount=2;}
+    }
     // Legacy canvases consume one Lab Track per lane. These are explicit compatibility
     // rows, not new musical owners. Only metadata.owners carries M/S/monitoring authority.
     Track hidden; hidden.id="legacy-main-sentinel"; hidden.name="Legacy fixture sentinel";
@@ -110,7 +116,7 @@ inline Session makePanelFixture()
     {
         Track t; t.id=lane.id; t.name=lane.name; t.group=lane.owner; t.groupName=lane.owner;
         t.route="Fixture only"; t.monitor="Auto"; t.audioChannels=2; t.order={0,1};
-        t.height=lane.initialHeight; t.colour=m->streamColours[static_cast<std::size_t>(lane.stream)];
+        t.height=std::max(minimumHeight(t),lane.initialHeight); t.colour=m->streamColours[static_cast<std::size_t>(lane.stream)];
         // The empty keys/audio lane explicitly demonstrates control and navigation availability.
         if (lane.id!="keys.audio")
         {
@@ -245,7 +251,21 @@ public:
         if (!model.state().panelMetadata) return panel::Result::fail("No fixture document");
         auto next=model.state(); auto meta=std::make_shared<PanelFixtureMetadata>(*next.panelMetadata);
         using K=panel::CommandKind;
-        if (c.kind==K::openOwner || c.kind==K::mute || c.kind==K::solo || c.kind==K::monitoring)
+        if(c.kind==K::renameOwner) {
+            const auto owner=std::find_if(meta->owners.begin(),meta->owners.end(),[&](const auto& v){return v.id==c.owner;});
+            if(owner==meta->owners.end()||owner->role==panel::OwnerRole::global||c.label.empty()||c.label.size()>256
+               ||std::any_of(c.label.begin(),c.label.end(),[](unsigned char ch){return ch<32;}))
+                return panel::Result::fail("Invalid owner rename");
+            owner->name=c.label;
+        }
+        else if(c.kind==K::renameLane) {
+            const auto lane=std::find_if(meta->lanes.begin(),meta->lanes.end(),[&](const auto& v){return v.id==c.lane;});
+            if(lane==meta->lanes.end()||lane->owner!=c.owner||c.label.empty()||c.label.size()>256
+               ||std::any_of(c.label.begin(),c.label.end(),[](unsigned char ch){return ch<32;}))
+                return panel::Result::fail("Invalid lane rename");
+            lane->name=c.label;if(auto* t=findTrack(next,c.lane))t->name=c.label;
+        }
+        else if (c.kind==K::openOwner || c.kind==K::mute || c.kind==K::solo || c.kind==K::monitoring)
         {
             auto owner=std::find_if(meta->owners.begin(),meta->owners.end(),[&](const auto& o){return o.id==c.owner;});
             if (owner==meta->owners.end()) return panel::Result::fail("Unknown owner");

@@ -1,0 +1,6 @@
+[  4%] Building CXX object CMakeFiles/ayra_identity_input_tests.dir/mnt/data/project/tests/NativePanelTests.cpp.o
+[  8%] Building CXX object CMakeFiles/ayra_identity_tests.dir/generated/MultiverseButtons.cpp.o
+[ 12%] Linking CXX executable ayra_identity_tests
+[ 62%] Built target ayra_identity_tests
+[ 66%] Linking CXX executable ayra_identity_input_tests
+[100%] Built target ayra_identity_input_tests

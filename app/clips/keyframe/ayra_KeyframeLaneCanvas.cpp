@@ -32,6 +32,22 @@ class KeyframeLaneCanvas final : public juce::Component,
                                  public clips::KeyframeLanePresentationProvider
 {
 public:
+  CanvasViewportBinding panelView;
+  void setPanelEvents(std::vector<KeyframeSourceEvent> initial)
+  {events=std::move(initial);nextEventId=1;for(const auto& e:events)nextEventId=std::max(nextEventId,e.id+1);rebuildVisualCache();}
+
+    std::shared_ptr<void> capturePanelState()const
+    {return std::make_shared<std::pair<std::vector<KeyframeSourceEvent>,int>>(events,nextEventId);}
+    void restorePanelState(const std::shared_ptr<void>& state)
+    {
+        if(!state)return;
+        const auto& saved=*std::static_pointer_cast<std::pair<std::vector<KeyframeSourceEvent>,int>>(state);
+        events=saved.first;nextEventId=saved.second;rebuildVisualCache();
+    }
+    std::vector<double> panelEventTimes()const
+    {std::vector<double> result;for(const auto& e:events)result.push_back(e.startSec);return result;}
+
+
     enum class HitZone
     {
         none,
@@ -158,7 +174,7 @@ public:
         }
         laneComponent->setLaneType (laneType);
 
-        if (events.empty())
+        if (events.empty()&&!panelView.enabled)
             initDefaultEvents();
 
         rebuildVisualCache();
@@ -174,8 +190,8 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        const auto pps = getWidth() / 32.0;
-        host.look().drawTrackGrid (g, getLocalBounds(), pps);
+        const auto pps = panelView.pixelsPerSecond(getWidth());
+        panelView.paintGrid(g,host.look(),getLocalBounds(),pps);
     }
 
     void paintOverChildren (juce::Graphics& g) override
@@ -328,17 +344,15 @@ private:
         if (laneComponent && getWidth() > 0 && getHeight() > 0)
         {
             laneComponent->setBodyBoundsInParent (
-                juce::Rectangle<float> (4.0f, 4.0f,
-                                         static_cast<float> (getWidth()) - 8.0f,
-                                         std::max (14.0f, static_cast<float> (height) - 8.0f)));
+                keyframeLaneBoundsInCanvas());
         }
     }
 
     [[nodiscard]] juce::Rectangle<float> keyframeLaneBoundsInCanvas() const noexcept
     {
-        return { 4.0f, 4.0f,
+        return panelView.domainBounds({ 4.0f, 4.0f,
                  juce::jmax (1.0f, static_cast<float> (getWidth()) - 8.0f),
-                 juce::jmax (14.0f, static_cast<float> (height) - 8.0f) };
+                 juce::jmax (14.0f, static_cast<float> (height) - 8.0f) });
     }
 
     HitInfo hitTestEvent (juce::Point<float> p) const
@@ -473,8 +487,7 @@ private:
                 laneType == KeyframeLaneType::points
                     ? clips::ClipKind::pointKeyframe
                     : clips::ClipKind::spanKeyframe,
-                zone, e.position, clips::timelineSecondsFromCanvasX (
-                    e.position.x, getWidth()), e.mods);
+                zone, e.position, panelView.xToTime(e.position.x,getWidth()), e.mods);
             context.eventIndex = hit.index;
             context.eventId = eventId;
             context.keyframeLaneType = laneType;
@@ -507,8 +520,8 @@ private:
         if (hit.zone == HitZone::bottomRail && hit.index >= 0 && hit.index < static_cast<int> (events.size()))
         {
             constexpr double totalTimelineSec = 32.0;
-            const double usableW = std::max (1.0, static_cast<double> (getWidth()) - 8.0);
-            const double splitSec = std::clamp (((e.position.x - 4.0) / usableW) * totalTimelineSec, 0.0, totalTimelineSec);
+            const double usableW = panelView.enabled ? panelView.time.pixelsPerSecond * 32.0 : std::max (1.0, static_cast<double> (getWidth()) - 8.0);
+            const double splitSec = std::clamp (((e.position.x - (panelView.enabled ? panelView.time.timeToX(0) : 4.0)) / usableW) * totalTimelineSec, 0.0, totalTimelineSec);
             const size_t i = static_cast<size_t> (hit.index);
 
             if (laneType == KeyframeLaneType::disjointSpans)
@@ -614,7 +627,7 @@ private:
             return;
 
         constexpr double totalTimelineSec = 32.0;
-        const double usableW = std::max (1.0, static_cast<double> (getWidth()) - 8.0);
+        const double usableW = panelView.enabled ? panelView.time.pixelsPerSecond * 32.0 : std::max (1.0, static_cast<double> (getWidth()) - 8.0);
         const double deltaSec = ((e.position.x - dragStartPos.x) / usableW) * totalTimelineSec;
 
         // Trova l'evento trascinato nello snapshot in base all'ID stabile
@@ -939,7 +952,7 @@ private:
             return; // click su estremi o barra di taglio
 
         // Se doppio click sul bordo/divider: cicla altezze canoniche
-        if (e.position.y >= getHeight() - 6.0f)
+        if (!panelView.enabled && e.position.y >= getHeight() - 6.0f)
         {
             const int modelHeight = clip_height_law::nextModelHeight (static_cast<float> (height), host.getVerticalZoom());
             host.store().resize (data.id, modelHeight);
@@ -948,8 +961,8 @@ private:
 
         // Doppio click sul vuoto della lane: inserisce un nuovo evento
         constexpr double totalTimelineSec = 32.0;
-        const double usableW = std::max (1.0, static_cast<double> (getWidth()) - 8.0);
-        const double clickedSec = std::clamp (((e.position.x - 4.0) / usableW) * totalTimelineSec,
+        const double usableW = panelView.enabled ? panelView.time.pixelsPerSecond * 32.0 : std::max (1.0, static_cast<double> (getWidth()) - 8.0);
+        const double clickedSec = std::clamp (((e.position.x - (panelView.enabled ? panelView.time.timeToX(0) : 4.0)) / usableW) * totalTimelineSec,
                                               0.0, totalTimelineSec - 0.5);
 
         for (auto& ev : events) ev.selected = false;
@@ -1008,6 +1021,9 @@ private:
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override
     {
+        if(panelView.enabled && (e.mods.isCommandDown()||e.mods.isCtrlDown()||e.mods.isShiftDown()))
+        { Component::mouseWheelMove(e,wheel);return; }
+
         if (e.mods.isAltDown() || e.mods.isCommandDown() || e.mods.isCtrlDown() || e.mods.isShiftDown())
         {
             const float delta = (std::abs (wheel.deltaY) > 0.0001f ? wheel.deltaY : wheel.deltaX);
