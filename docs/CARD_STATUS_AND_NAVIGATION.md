@@ -1,3 +1,7 @@
+> Aggiornamento: la passivita del nome e la disposizione degli stati descritti qui
+> sono sostituiti da [card adattiva e rinomina](ADAPTIVE_CARD_AND_TITLE_EDIT.md).
+> Questo documento conserva il contratto della precedente consegna.
+
 # Card: navigazione e stato della traccia
 
 Questa revisione sostituisce il piano della pulsantiera/ostacolo dentro la lane.

@@ -72,6 +72,9 @@ struct LaneCanvas
     std::function<std::vector<double>()> eventTimes;
     // Pure content/width measurement, never a function of the current height.
     std::function<int(int width)> preferredHeight;
+    // Optional subscription; the canvas clears it on destruction. The host
+    // unregisters before eviction. Allows event edits to remeasure auto-height.
+    std::function<void(std::function<void()>)> setContentChangeListener;
     bool supportsDocumentEvents=true;
     // Canvas-local, side-effect-free query using the SAME clip/editor geometry
     // as input. A component's rectangular hitTest or a lane time interval is
@@ -151,6 +154,11 @@ public:
     std::optional<TimelineIdentityContent> getIdentityReadout(const Id& lane)const
     {if(auto* r=cache.find("lane:"+lane))return r->identityReadout();return {};}
     bool hasPendingIdentityTransition()const noexcept{return identityDue.has_value();}
+    // Lane-local rectangles; getIdentityBounds above is panel-local.
+    std::optional<TimelineIdentityLayout> getIdentityLayout(const Id& lane)const
+    {if(auto* r=cache.find("lane:"+lane))return r->identityGeometry();return {};}
+    bool isIdentityEditing(const Id& lane)const
+    {if(auto* r=cache.find("lane:"+lane))return r->isEditingTitle();return false;}
     // Async waveform/image providers call this when pixels change independently
     // of a CanvasFrame revision. Presentation invalidation, not a document edit.
     void notifyCanvasContentChanged(const Id& lane)
@@ -315,8 +323,8 @@ private:
             void mouseExit(const juce::MouseEvent& e) override { observe(e); }
             void mouseDown(const juce::MouseEvent& e) override { changed(e,true); }
             void mouseDrag(const juce::MouseEvent& e) override { changed(e,true); }
-            void mouseUp(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled(); }
-            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled(); }
+            void mouseUp(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
+            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
             void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails&) override { changed(e); }
         private:
             LaneRow& owner;
@@ -325,6 +333,23 @@ private:
                 owner.underlayDirty=true;
                 owner.updateIdentityPointer(e.getEventRelativeTo(&owner).position,editing);
             }
+        };
+        // This is deliberately only the rendered TRACK name, not the lens.
+        // Other labels and passive state glyphs still target the real canvas.
+        class TitleInput final:public juce::Component,public juce::TooltipClient
+        {
+        public:
+            explicit TitleInput(LaneRow& row):owner(row){setMouseCursor(juce::MouseCursor::IBeamCursor);setWantsKeyboardFocus(true);}
+            bool hitTest(int x,int y)override
+            {
+                const auto p=owner.getLocalPoint(this,juce::Point<int>{x,y});
+                return owner.identityLayout.titleHit.contains(p)
+                    ||(owner.titleExpanded&&owner.titleHoverOrigin.contains(p));
+            }
+            void mouseDoubleClick(const juce::MouseEvent& e)override
+            {if(e.mods.isLeftButtonDown())owner.beginTitleEdit();}
+            juce::String getTooltip()override{return owner.identityContent.track;}
+        private:LaneRow& owner;
         };
         class ResizeInput final:public juce::Component
         {
@@ -337,16 +362,18 @@ private:
         private:LaneRow& owner;
         };
     public:
-        explicit LaneRow(TimelinePanel& p):host(p),pointerObserver(*this),resizeInput(*this),identitySurface(*this)
-        {setWantsKeyboardFocus(true);addMouseListener(&pointerObserver,true);addAndMakeVisible(resizeInput);addAndMakeVisible(identitySurface);}
-        ~LaneRow()override {host.scheduleIdentity(row.key,{});removeMouseListener(&pointerObserver);if(canvas.saveState)canvas.saveState();}
+        explicit LaneRow(TimelinePanel& p):host(p),pointerObserver(*this),resizeInput(*this),identitySurface(*this),titleInput(*this)
+        {setWantsKeyboardFocus(true);addMouseListener(&pointerObserver,true);addAndMakeVisible(resizeInput);addAndMakeVisible(identitySurface);identitySurface.addAndMakeVisible(titleInput);}
+        ~LaneRow()override {if(canvas.setContentChangeListener)canvas.setContentChangeListener({});host.scheduleIdentity(row.key,{});removeMouseListener(&pointerObserver);if(canvas.saveState)canvas.saveState();}
         juce::Rectangle<int> identityBounds() const { return identityLayout.backdrop; }
         bool identitySuppressed() const { return identityHover.hidden(); }
         TimelineIdentityContent identityReadout() const { return identityContent; }
-        void contentPixelsChanged() { underlayDirty=true;updateNavigationEnabled();sampleIdentityPointer();repaint(identityLayout.backdrop); }
+        TimelineIdentityLayout identityGeometry()const{return identityLayout;}
+        bool isEditingTitle()const noexcept{return editingTitle;}
+        void contentPixelsChanged() { underlayDirty=true;measureAutoHeight();updateNavigationEnabled();sampleIdentityPointer();repaint(identityLayout.backdrop); }
         void pollIdentityPointer(){sampleIdentityPointer();}
         void resetIdentityInteraction(){
-            identityHover.reset();identitySurface.setVisible(true);
+            finishTitleEdit(false);titleExpanded=false;titleHoverOrigin={};identityHover.reset();identitySurface.setVisible(true);
             host.scheduleIdentity(row.key,{});underlayDirty=true;
         }
         void updateNavigationEnabled(){
@@ -357,6 +384,11 @@ private:
         {
             setComponentID("lane:"+text(row.lane));resizeInput.setComponentID("resize:"+text(row.lane));
             if(const auto* lane=host.controller.lane(row.lane)){canvas=host.factory(*lane);createdVisual=lane->visual;}
+            titleInput.setComponentID("identity-title:"+text(row.lane));
+            if(canvas.setContentChangeListener) {
+                juce::Component::SafePointer<LaneRow> safe(this);
+                canvas.setContentChangeListener([safe]{if(safe)safe->contentPixelsChanged();});
+            }
             if(canvas.component){canvas.component->setComponentID("canvas:"+text(row.lane));addAndMakeVisible(*canvas.component);canvas.component->toBack();}
             for(std::size_t i=0;i<buttons.size();++i){
                 buttons[i]=host.painter.makeButton(static_cast<LaneButton>(i));
@@ -377,7 +409,7 @@ private:
         }
         bool matches(const Lane& lane)const{return createdVisual&&*createdVisual==lane.visual;}
         bool interacting()const
-        {return dragging||accentDown||resizing||isMouseButtonDown(true)
+        {return editingTitle||dragging||accentDown||resizing||isMouseButtonDown(true)
             ||(canvas.hasInteraction&&canvas.hasInteraction());}
         void bindRow()
         {
@@ -407,6 +439,7 @@ private:
             nextIdentity.ownerColour=juce::Colour(owner->colour);
             nextIdentity.typeColour=isGlobal?juce::Colour(owner->colour):(lane&&host.style.streamColour?host.style.streamColour(lane->stream):host.style.foreground);
             nextIdentity.compact=isGlobal;
+            nextIdentity.expanded=titleExpanded||editingTitle;
             nextIdentity.navigation=lane&&lane->navigation&&host.controller.view().identityNavigation;
             nextIdentity.muted=owner->muted;nextIdentity.soloed=owner->soloed;
             nextIdentity.status=owner->status;
@@ -416,17 +449,12 @@ private:
             const auto contentBounds=rectangle(geometry.content);
             if(!identityReady||nextIdentity!=identityContent||identityArea!=contentBounds||identityEpoch!=host.frameEpoch){
                 identityContent=nextIdentity;identityArea=contentBounds;identityEpoch=host.frameEpoch;identityReady=true;
-                identityLayout=TimelineIdentityLayout::make(contentBounds,identityContent,host.style.identityTypography);
-                identityBackdrop=host.painter.prepareIdentity(identityContent,identityLayout);
-                underlayDirty=true;
+                rebuildIdentityGeometry();
             }
-            identitySurface.setBounds(identityLayout.backdrop);
-            identitySurface.toFront(false);
-            const std::array<juce::Rectangle<int>,2> navRects{identityLayout.previous,identityLayout.next};
-            for(std::size_t i=0;i<navRects.size();++i){
-                navigation[i]->setBounds(navRects[i].translated(-identityLayout.backdrop.getX(),-identityLayout.backdrop.getY()));
-                navigation[i]->setVisible(!navRects[i].isEmpty());
-            }
+            // A disappearing owner or a concurrent rename invalidates the edit;
+            // unrelated readback revisions do not silently overwrite user input.
+            if(editingTitle&&(!canRenameTitle()||host.session!=editSession||owner->id!=editOwner||text(owner->name)!=editOriginal))
+                finishTitleEdit(false);
             resizeInput.toFront(false);
             resizeInput.setBounds(rectangle(geometry.resizeHit));resizeInput.setVisible(!geometry.resizeHit.empty());resizeInput.toFront(false);
             if(canvas.component&&lane){
@@ -436,15 +464,14 @@ private:
                 f.time.originX-=geometry.content.x;f.selected=host.controller.view().selectedLanes.contains(lane->id);f.ownerColour=owner->colour;
                 if(!lastFrame||*lastFrame!=f||lastEpoch!=host.frameEpoch){if(canvas.bind)canvas.bind(*lane,f);lastFrame=f;lastEpoch=host.frameEpoch;underlayDirty=true;}
             }
-            if(lane&&lane->heightPolicy==HeightPolicy::automatic&&canvas.preferredHeight)
-                if(host.controller.setAutoHeight(lane->id,canvas.preferredHeight(geometry.content.width)))host.triggerAsyncUpdate();
+            measureAutoHeight();
             updateNavigationEnabled();
             sampleIdentityPointer(); // includes stationary-pointer scroll / zoom
             repaint();
         }
         void visibilityChanged() override
         {
-            if(!isVisible()){identityHover.reset();host.scheduleIdentity(row.key,{});}
+            if(!isVisible()){finishTitleEdit(false);titleExpanded=false;titleHoverOrigin={};identityHover.reset();host.scheduleIdentity(row.key,{});}
             underlayDirty=true;
         }
         void paint(juce::Graphics& g)override
@@ -516,7 +543,12 @@ private:
     private:
         TimelinePanel& host;LaneCanvas canvas;ChromeGeometry geometry;std::optional<VisualKind> createdVisual;
         std::array<std::unique_ptr<juce::Button>,6> buttons;
-        PointerObserver pointerObserver;ResizeInput resizeInput;IdentitySurface identitySurface;
+        PointerObserver pointerObserver;ResizeInput resizeInput;IdentitySurface identitySurface;TitleInput titleInput;
+        std::unique_ptr<juce::TextEditor> titleEditor;
+        bool titleExpanded=false,editingTitle=false;
+        juce::Rectangle<int> titleHoverOrigin;
+        Id editSession,editOwner;juce::String editOriginal;
+        std::uint64_t editRevision=0;
         std::array<std::unique_ptr<juce::Button>,2> navigation;
         TimelineIdentityContent identityContent; TimelineIdentityLayout identityLayout;
         juce::Image identityBackdrop; juce::Rectangle<int> identityArea;
@@ -536,16 +568,110 @@ private:
                 host.painter.drawMeter(g,r,v);
             }
         }
+        bool canRenameTitle()const
+        {
+            const auto* owner=host.controller.owner(row.owner);
+            return owner&&(owner->role==OwnerRole::track||owner->role==OwnerRole::convergence||owner->role==OwnerRole::songMain);
+        }
+        void rebuildIdentityGeometry()
+        {
+            const auto old=identityLayout.backdrop;
+            identityContent.expanded=titleExpanded||editingTitle;
+            identityLayout=TimelineIdentityLayout::make(identityArea,identityContent,host.style.identityTypography);
+            identityBackdrop=host.painter.prepareIdentity(identityContent,identityLayout);underlayDirty=true;
+            identitySurface.setBounds(identityLayout.backdrop);identitySurface.toFront(false);
+            const auto offset=identityLayout.backdrop.getPosition();
+            const std::array<juce::Rectangle<int>,2> rects{identityLayout.previous,identityLayout.next};
+            for(std::size_t i=0;i<rects.size();++i)if(navigation[i]){
+                navigation[i]->setBounds(rects[i].translated(-offset.x,-offset.y));navigation[i]->setVisible(!rects[i].isEmpty());
+            }
+            const auto titleTarget=titleExpanded?identityLayout.titleHit.getUnion(titleHoverOrigin):identityLayout.titleHit;
+            titleInput.setBounds(titleTarget.translated(-offset.x,-offset.y));
+            titleInput.setName(identityContent.track);
+            titleInput.setVisible(canRenameTitle()&&!editingTitle&&!identityLayout.titleHit.isEmpty());
+            if(titleEditor&&editingTitle){
+                titleEditor->setBounds(identityLayout.track.translated(-offset.x,-offset.y));
+                titleEditor->setFont(identityLayout.trackFont);
+                titleEditor->toFront(false);
+            }
+            identitySurface.setVisible(!identityHover.hidden());repaint(old.getUnion(identityLayout.backdrop));
+        }
+        void beginTitleEdit()
+        {
+            if(editingTitle||!canRenameTitle()||identityHover.hidden())return;
+            const auto* owner=host.controller.owner(row.owner);if(!owner)return;
+            editSession=host.session;editOwner=owner->id;editOriginal=text(owner->name);
+            editRevision=host.controller.snapshot().revision;
+            editingTitle=true;titleExpanded=true;identityHover.reset();host.scheduleIdentity(row.key,{});
+            if(!titleEditor){
+                titleEditor=std::make_unique<juce::TextEditor>();
+                titleEditor->setComponentID("identity-editor:"+text(row.lane));
+                titleEditor->setMultiLine(false);titleEditor->setReturnKeyStartsNewLine(false);
+                titleEditor->setInputRestrictions(256);
+                titleEditor->onReturnKey=[this]{finishTitleEdit(true);};
+                titleEditor->onEscapeKey=[this]{finishTitleEdit(false);};
+                titleEditor->onFocusLost=[this]{finishTitleEdit(true);};
+                identitySurface.addChildComponent(*titleEditor);
+            }
+            titleEditor->setColour(juce::TextEditor::backgroundColourId,host.style.background.withAlpha(0.96f));
+            titleEditor->setColour(juce::TextEditor::textColourId,host.style.foreground);
+            titleEditor->setColour(juce::TextEditor::outlineColourId,juce::Colours::transparentBlack);
+            titleEditor->setColour(juce::TextEditor::focusedOutlineColourId,identityContent.ownerColour.withAlpha(0.65f));
+            titleEditor->setIndents(0,0);titleEditor->setBorder({0,0,0,0});
+            titleEditor->setText(editOriginal,false);rebuildIdentityGeometry();
+            titleEditor->setVisible(true);titleEditor->grabKeyboardFocus();titleEditor->selectAll();
+        }
+        void finishTitleEdit(bool commit)
+        {
+            if(!editingTitle)return;
+            const auto label=titleEditor?titleEditor->getText().trim():juce::String{};
+            editingTitle=false; // before focusLost, which can be synchronous
+            if(titleEditor)titleEditor->setVisible(false);
+            titleInput.setVisible(canRenameTitle());
+            if(!commit||label==editOriginal){repaint();return;}
+            if(label.isEmpty()){host.report(Result::fail("Il nome della traccia non puo essere vuoto"));return;}
+            const auto session=editSession,owner=editOwner;const auto original=editOriginal;
+            const auto revision=editRevision;const auto lane=row.lane;
+            juce::Component::SafePointer<TimelinePanel> safe(&host);
+            // Never destroy/rebind the row inside a TextEditor callback. One
+            // host command, same owner for every sibling, with optimistic guards.
+            juce::MessageManager::callAsync([safe,session,owner,original,revision,lane,label]{
+                if(!safe||safe->session!=session)return;
+                const auto* current=safe->controller.owner(owner);const auto* target=safe->controller.lane(lane);
+                if(!current||!target||target->owner!=owner||text(current->name)!=original
+                    ||safe->controller.snapshot().revision<revision){
+                    safe->report(Result::fail("Rinomina annullata: la traccia e cambiata"));return;
+                }
+                safe->report(safe->controller.renameOwner(owner,label.toStdString()));safe->refresh();
+            });
+        }
+        void measureAutoHeight()
+        {
+            const auto* lane=host.controller.lane(row.lane);
+            if(!lane||lane->heightPolicy!=HeightPolicy::automatic||!canvas.preferredHeight)return;
+            if(canvas.component&&canvas.component->isMouseButtonDown(true))return;
+            if(host.applyAutoHeight(lane->id,canvas.preferredHeight(geometry.content.width)))host.triggerAsyncUpdate();
+        }
         void updateIdentityPointer(juce::Point<float> p,bool editing=false)
         {
+            if(editingTitle){host.scheduleIdentity(row.key,{});identitySurface.setVisible(true);return;}
             const auto inBody=host.body.getLocalPoint(this,p);
-            const bool inside=isShowing()&&host.body.getLocalBounds().toFloat().contains(inBody)
-                &&identityLayout.backdrop.toFloat().contains(p);
+            const bool withinView=isShowing()&&host.body.getLocalBounds().toFloat().contains(inBody);
+            bool inside=withinView&&identityLayout.backdrop.toFloat().contains(p);
             const bool onNavigation=inside&&!identityHover.hidden()
                 &&(identityLayout.navigationGroup.toFloat().contains(p)
                    ||(navigation[0]&&navigation[0]->isDown())||(navigation[1]&&navigation[1]->isDown()));
+            const bool onTitle=inside&&!identityHover.hidden()&&canRenameTitle()
+                &&(identityLayout.titleHit.toFloat().contains(p)||(titleExpanded&&titleHoverOrigin.toFloat().contains(p)));
+            const bool expand=onTitle||(titleExpanded&&onNavigation);
+            if(expand!=titleExpanded){
+                if(expand)titleHoverOrigin=identityLayout.titleHit;else titleHoverOrigin={};
+                titleExpanded=expand;rebuildIdentityGeometry();
+                inside=withinView&&identityLayout.backdrop.toFloat().contains(p);
+            }
+            const bool protectedTarget=onNavigation||onTitle;
             bool editable=false;
-            if(inside&&!onNavigation&&!identityHover.hidden()&&canvas.component) {
+            if(inside&&!protectedTarget&&!identityHover.hidden()&&canvas.component) {
                 const auto local=canvas.component->getLocalPoint(this,p);
                 auto* target=getComponentAt(p.roundToInt());
                 if(target&&(target==canvas.component.get()||canvas.component->isParentOf(target))) {
@@ -553,18 +679,20 @@ private:
                     else if(canvas.containsClipAt)editable=canvas.containsClipAt(local);
                 }
             }
-            if(identityHover.update(inside,editable,onNavigation,juce::Time::getMillisecondCounterHiRes(),editing)) {
+            if(identityHover.update(inside,editable,protectedTarget,juce::Time::getMillisecondCounterHiRes(),editing)) {
                 underlayDirty=true;repaint(identityLayout.backdrop);
             }
             identitySurface.setVisible(!identityHover.hidden());
             host.scheduleIdentity(row.key,identityHover.deadline());
         }
+
         void paintIdentity(juce::Graphics& g)
         {
             if(identityHover.hidden())return;
             prepareUnderlayIfNeeded(g);
             host.painter.drawIdentityUnderlay(g,identityLayout,identityUnderlay,underlayBounds);
-            host.painter.drawIdentity(g,identityContent,identityLayout,identityBackdrop);
+            auto readout=identityContent;if(editingTitle)readout.track.clear();
+            host.painter.drawIdentity(g,readout,identityLayout,identityBackdrop);
         }
 
         void sampleIdentityPointer()
@@ -633,6 +761,18 @@ private:
     {setPlayhead(seconds);if(time.timeToX(playhead)<0||time.timeToX(playhead)>body.getWidth())time.startSeconds=std::max(0.0,playhead-1);refresh();if(onSeek)onSeek(playhead);}
     void scrollBarMoved(juce::ScrollBar* bar,double start)override
     {if(bar==&horizontal)time.startSeconds=std::max(0.0,start);else scrollY=static_cast<std::int64_t>(start);refresh();}
+    // Preserve the visible row's offset when automatic rows above it resize.
+    // Measurement never depends on lens height, so chrome cannot create loops.
+    bool applyAutoHeight(const Id& id,int height)
+    {
+        Id anchor;double top=0;
+        controller.visitRows(scrollY,1,0,[&](const Row& r){if(anchor.empty()){anchor=r.lane;top=r.top;}});
+        const auto offset=static_cast<double>(scrollY)-top;
+        if(!controller.setAutoHeight(id,height))return false;
+        if(!anchor.empty())scrollY=static_cast<std::int64_t>(controller.laneTop(anchor)
+            +std::clamp(offset,0.0,static_cast<double>(std::max(0,controller.height(anchor)-1))));
+        return true;
+    }
     void handleAsyncUpdate()override{refresh();}
     // One panel timer serves BOTH a single pointer candidate and optional meters.
     // At rest with meters hidden it is stopped. No O(number-of-lanes) polling.

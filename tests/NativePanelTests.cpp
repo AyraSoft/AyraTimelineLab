@@ -99,7 +99,7 @@ void cardStatusContracts()
     prev->triggerClick();pump();CHECK(seeks==1&&p.getPlayhead()==0&&commands==0);
     auto* canvas=find(p,"canvas:1");CHECK(canvas);
     auto lens=p.getIdentityBounds("1");CHECK(!lens.isEmpty());
-    auto point=lens.getCentre();auto q=canvas->getLocalPoint(&p,point).toFloat();
+    auto point=juce::Point<int>{lens.getX()+28,lens.getY()+8};auto q=canvas->getLocalPoint(&p,point).toFloat();
     records["1"].clip={q.x-12,q.y-10,24,20};
     auto pointer=[&](juce::Point<int> pos){
         juce::Desktop::getInstance().getMainMouseSource().setScreenPosition(p.localPointToGlobal(pos).toFloat());
@@ -139,7 +139,7 @@ void cardStatusContracts()
     settings.inputMeters=false;p.setChrome(settings);const auto atStop=meterReads;wait(120);CHECK(meterReads==atStop);
     p.readMeter=nullptr;
     // A pending wake-up must not survive removing the owning lane or hiding UI.
-    lens=p.getIdentityBounds("1");canvas=find(p,"canvas:1");point=lens.getCentre();q=canvas->getLocalPoint(&p,point).toFloat();
+    lens=p.getIdentityBounds("1");canvas=find(p,"canvas:1");point={lens.getX()+28,lens.getY()+8};q=canvas->getLocalPoint(&p,point).toFloat();
     records["1"].clip={q.x-10,q.y-10,20,20};pointer(point);CHECK(p.hasPendingIdentityTransition());
     p.setVisible(false);CHECK(!p.hasPendingIdentityTransition());wait(550);
     p.setVisible(true);p.refresh();wait(100);pointer(point); // let the native window-manager remap settle
@@ -151,7 +151,116 @@ void cardStatusContracts()
     CHECK(p.isIdentitySuppressed("1"));
     p.setIdentityNavigation(false);CHECK(!find(p,"card-nav:next:0")->isShowing());
     p.removeFromDesktop();CHECK(commands==1);
+}void adaptiveTitleContracts()
+{
+    Controller c;auto initial=fixture(30);
+    initial.owners[1].name="A complete and intentionally long name for this shared track";
+    CHECK(c.adopt(initial));CHECK(c.setMode(Mode::freeLanes));
+    std::map<Id,Record> records;TestArtwork artwork;int commands=0,errors=0;Command last;
+    std::map<Id,int> sizes;std::map<Id,std::function<void()>> contentChanged;
+    c.onCommand=[&](const Command& cmd){
+        ++commands;last=cmd;
+        auto next=c.snapshot();++next.revision;
+        if(cmd.kind==CommandKind::renameOwner)for(auto& o:next.owners)if(o.id==cmd.owner)o.name=cmd.label;
+        return c.adopt(std::move(next));
+    };
+    TimelinePanel p(c,[&](const Lane& lane){
+        LaneCanvas result;auto& r=records[lane.id];result.component=std::make_unique<MockCanvas>(r);
+        result.bind=[&r](const Lane&,const CanvasFrame& f){r.frame=f;++r.binds;};
+        result.containsEditableAt=[&r](juce::Point<float> q){return r.clip.contains(q);};
+        result.preferredHeight=[&,id=lane.id](int){return sizes.contains(id)?sizes[id]:24;};
+        result.setContentChangeListener=[&,id=lane.id](auto callback){contentChanged[id]=std::move(callback);};
+        return result;
+    },artwork);
+    p.onResult=[&](const Result& r){if(!r)++errors;};
+    p.setSize(1000,650);p.addToDesktop(juce::ComponentPeer::windowIsTemporary);p.setVisible(true);p.refresh();pump();
+    auto wait=[](int ms){juce::MessageManager::getInstance()->runDispatchLoopUntil(ms);};
+    auto pointer=[&](juce::Point<int> pos){
+        juce::Desktop::getInstance().getMainMouseSource().setScreenPosition(p.localPointToGlobal(pos).toFloat());
+        p.getPeer()->handleMouseEvent(juce::MouseInputSource::mouse,pos.toFloat(),{},0,0,juce::Time::currentTimeMillis());pump();
+    };
+    auto title=[&](const Id& lane){auto* t=find(p,"identity-title:"+text(lane));CHECK(t&&t->isShowing());return t;};
+    auto titlePoint=[&](const Id& lane){auto* t=title(lane);return p.getLocalPoint(t,t->getLocalBounds().getCentre());};
+    auto begin=[&](const Id& lane){
+        pointer(titlePoint(lane));auto* t=title(lane);t->mouseDoubleClick(event(*t,t->getLocalBounds().getCentre().toFloat(),2));pump();
+        auto* e=dynamic_cast<juce::TextEditor*>(find(p,"identity-editor:"+text(lane)));CHECK(e&&e->isShowing());CHECK(p.isIdentityEditing(lane));return e;
+    };
+    auto* canvas=find(p,"canvas:0");CHECK(canvas);records["0"].clip=canvas->getLocalBounds().toFloat();
+    const auto small=p.getIdentityBounds("0");const auto initialHeight=c.height("0");const auto original=initial.owners[1].name;
+    pointer(titlePoint("0"));wait(550);
+    CHECK(!p.isIdentitySuppressed("0"));CHECK(!p.hasPendingIdentityTransition());
+    CHECK(p.getIdentityBounds("0").getWidth()>small.getWidth());CHECK(c.height("0")==initialHeight);
+    CHECK(!p.getIdentityLayout("0")->titleTruncated);
+    CHECK(records["0"].doubled==0); // title hover never synthesizes canvas input
+    auto* arrow=find(p,"card-nav:next:0");pointer(p.getLocalPoint(arrow,arrow->getLocalBounds().getCentre()));
+    CHECK(p.getIdentityBounds("0").getWidth()>small.getWidth());CHECK(!p.hasPendingIdentityTransition());
+    // Leave ONLY the protected targets: metadata starts the existing delay.
+    auto lens=p.getIdentityBounds("0");pointer({lens.getRight()-90,lens.getY()+6});
+    CHECK(p.hasPendingIdentityTransition());wait(550);CHECK(p.isIdentitySuppressed("0"));
+    CHECK(!find(p,"identity-title:0")->isShowing());CHECK(!arrow->isShowing());
+    pointer({10,5});CHECK(!p.isIdentitySuppressed("0"));
+    auto* editor=begin("0");CHECK(editor->getText()==text(original));
+    CHECK(commands==0&&records["0"].doubled==0);editor->setText("Renamed shared track",false);
+    CHECK(editor->keyPressed(juce::KeyPress(juce::KeyPress::returnKey)));pump();
+    CHECK(commands==1&&last.kind==CommandKind::renameOwner&&last.owner=="owner");
+    CHECK(c.owner("owner")->name=="Renamed shared track");CHECK(!p.isIdentityEditing("0"));
+    CHECK(p.getIdentityReadout("1")->track=="Renamed shared track");
+    editor=begin("0");editor->setText("Cancelled",false);
+    CHECK(editor->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey)));pump();CHECK(commands==1);
+    CHECK(c.owner("owner")->name=="Renamed shared track");
+    editor=begin("0");editor->setText("   ",false);editor->onReturnKey();pump();CHECK(commands==1&&errors==1);
+    // A status-only revision can rebase the rename, but a concurrent rename cannot.
+    editor=begin("0");editor->setText("After status update",false);
+    auto changed=c.snapshot();++changed.revision;changed.owners[1].muted=true;CHECK(c.adopt(changed));p.refresh();
+    CHECK(p.isIdentityEditing("0"));editor->onReturnKey();pump();CHECK(commands==2);CHECK(c.owner("owner")->name=="After status update");
+    editor=begin("0");editor->setText("Lost edit",false);
+    changed=c.snapshot();++changed.revision;changed.owners[1].name="External rename";CHECK(c.adopt(changed));p.refresh();
+    CHECK(!p.isIdentityEditing("0"));CHECK(c.owner("owner")->name=="External rename");CHECK(commands==2);
+    editor=begin("0");editor->setText("Focus loss commits once",false);title("1")->grabKeyboardFocus();pump();
+    CHECK(commands==3);CHECK(c.owner("owner")->name=="Focus loss commits once");
+    // Scroll does not recycle an active editor; finishing removes the lease.
+    editor=begin("0");editor->setText("Offscreen",false);p.setVerticalPosition(1800);pump();
+    CHECK(p.isIdentityEditing("0"));CHECK(find(p,"identity-editor:0")==editor);
+    editor->onEscapeKey();p.refresh();p.setVerticalPosition(0);pump();CHECK(commands==3);
+    // A left-anchored lens expands towards the interior. Preserve the original
+    // title hit region through this reflow, so the second click cannot hit a clip.
+    changed=c.snapshot();++changed.revision;changed.owners[1].name=original;CHECK(c.adopt(changed));
+    auto leftChrome=c.view().chrome;leftChrome.nameSide=presentation::TimelineNameSide::left;p.setChrome(leftChrome);
+    pointer({10,5});const auto originalClick=titlePoint("0");pointer(originalClick);
+    auto* clicked=p.getComponentAt(originalClick);CHECK(clicked==find(p,"identity-title:0"));
+    clicked->mouseDoubleClick(event(*clicked,clicked->getLocalPoint(&p,originalClick).toFloat(),2));pump();
+    CHECK(p.isIdentityEditing("0"));
+    editor=dynamic_cast<juce::TextEditor*>(find(p,"identity-editor:0"));CHECK(editor);editor->onEscapeKey();pump();
+    leftChrome.nameSide=presentation::TimelineNameSide::right;p.setChrome(leftChrome);pointer({10,5});
+    // Automatic lane size is measured from content, independent of lens layout.
+    changed=c.snapshot();++changed.revision;
+    for(auto& l:changed.lanes)if(l.id=="0"||l.id=="1"){
+        l.heightPolicy=HeightPolicy::automatic;l.minimumHeight=24;l.initialHeight=24;l.visual=VisualKind::point;
+    }
+    sizes["0"]=24;sizes["1"]=32;CHECK(c.adopt(changed));p.refresh();pump();pump();
+    CHECK(c.height("0")==24&&c.height("1")==32);CHECK(!p.getIdentityLayout("0")->twoLines);
+    CHECK(!find(p,"resize:0")->isShowing());CHECK(!c.beginResize("0"));
+    CHECK(contentChanged["0"]);sizes["0"]=46;contentChanged["0"]();pump();pump();
+    CHECK(c.height("0")==46);CHECK(p.getIdentityLayout("0")->twoLines);
+    const auto bindings=records["0"].binds;for(int i=0;i<20;++i){contentChanged["0"]();p.refresh();}
+    CHECK(records["0"].binds==bindings); // no measurement/layout feedback loop
+    sizes["0"]=24;contentChanged["0"]();pump();CHECK(c.height("0")==24);CHECK(!p.getIdentityLayout("0")->twoLines);
+    // All active icons fit below arrows even on a one-line 24px event lane.
+    changed=c.snapshot();++changed.revision;changed.owners[1].status={true,true,true,true,true,true,true};
+    CHECK(c.adopt(changed));p.refresh();auto geometry=*p.getIdentityLayout("0");
+    for(auto r:geometry.indicators){CHECK(!r.isEmpty());CHECK(r.getY()>=geometry.navigationGroup.getBottom());}
+    // Keep scroll anchor when an automatic row just above it changes height.
+    p.setVerticalPosition(c.laneTop("1")+5);pump();auto* row=find(p,"lane:2");CHECK(row);
+    const int oldY=p.getLocalArea(row,row->getLocalBounds()).getY();
+    sizes["0"]=46;contentChanged["0"]();pump();
+    row=find(p,"lane:2");CHECK(p.getLocalArea(row,row->getLocalBounds()).getY()==oldY);
+    p.setVerticalPosition(0);pump();
+    editor=begin("0");editor->setText("Never another song",false);
+    changed=c.snapshot();changed.session="new-session";++changed.revision;CHECK(c.adopt(changed));p.refresh();pump();
+    CHECK(!p.isIdentityEditing("0"));CHECK(commands==3);
+    p.removeFromDesktop();
 }
+
 }
 int main()
 {
@@ -183,8 +292,8 @@ int main()
     auto lens=panel.getIdentityBounds("0");CHECK(!lens.isEmpty());
     CHECK(!find(panel,"name:0")&&!find(panel,"lane-name:0")&&!find(panel,"rename:0"));
     CHECK(artwork.identity.performer=="Ayra");CHECK(artwork.identity.track=="Shared Tensor");
-    const auto centre=lens.getCentre();
-    CHECK(panel.getComponentAt(centre)==canvas); // no text proxy, even while visible
+    const auto centre=juce::Point<int>{lens.getX()+28,lens.getY()+8};
+    CHECK(panel.getComponentAt(centre)==canvas); // metadata remains a real canvas target, even while visible
     CHECK(std::abs(panel.getLocalArea(row,row->getLocalBounds()).getCentreY()-lens.getCentreY())<=1);
     for(int h:{56,65,96,177,400}) {
         controller.setHeight("0",h);panel.refresh();
@@ -239,8 +348,9 @@ int main()
     settings.nameSide=presentation::TimelineNameSide::left;settings.accentSide=presentation::TimelineAccentSide::both;panel.setChrome(settings);
     CHECK(panel.getIdentityBounds("0").getX()<200);
     lens=panel.getIdentityBounds("0");canvas=find(panel,"canvas:0");
-    const auto leftLocal=canvas->getLocalPoint(&panel,lens.getCentre()).toFloat();
-    records["0"].clip={leftLocal.x-10,leftLocal.y-10,20,20};pointer(lens.getCentre());
+    const auto leftPoint=juce::Point<int>{lens.getX()+28,lens.getY()+8};
+    const auto leftLocal=canvas->getLocalPoint(&panel,leftPoint).toFloat();
+    records["0"].clip={leftLocal.x-10,leftLocal.y-10,20,20};pointer(leftPoint);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(550);
     CHECK(panel.isIdentitySuppressed("0"));pointer({lens.getRight()+4,lens.getCentreY()});
     CHECK(!panel.isIdentitySuppressed("0"));records["0"].clip={};
@@ -261,5 +371,6 @@ int main()
     CHECK(controller.adopt(modified));panel.refresh();CHECK(panel.getCreatedRowCount()==previousMade+1);
     panel.removeFromDesktop();
     cardStatusContracts();
+    adaptiveTitleContracts();
     std::cout<<"PASS "<<checks<<" native component assertions; 10000 logical lanes; maximum resident rows "<<maximum<<"\n";
 }

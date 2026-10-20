@@ -11,18 +11,23 @@ libera. Il contenuto scorre nel tempo; nome, accenti e controlli restano nel vie
 La card resta centrata verticalmente anche durante il resize. Il Performer è a
 sinistra; tipo e nome traccia sono allineati a destra. Il bordo sinistro del
 fondale (blur e riflesso compresi) scompare prima degli angoli.
-È compatta e non editabile. Solo le due frecce subito dopo il tipo sono pulsanti:
-nomi e indicatori lasciano passare i gesti al contenuto sottostante. Sopra clip,
-linee, punti e span, l'attesa di 500 ms nasconde la lente; le frecce annullano
-l'attesa e uscirne la riavvia. Una lente nascosta riappare all'uscita dalla sua area.
-M gialla e S rossa seguono il nome della traccia; le altre sette indicazioni sono
-piccoli glyph passivi presenti soltanto quando attivi. Nessuna terza riga.
+Il nome della traccia e le frecce proteggono la card dall'hover-hide. Il doppio
+click sul nome apre l'editor inline: Enter/perdita focus confermano una transazione
+owner condivisa, Escape annulla. I nomi troncati si espandono orizzontalmente al
+passaggio del mouse, senza spostare le clip. Performer, tipo e stati restano passivi.
+Sopra il restante contenuto editabile la card scompare dopo 500 ms, con un solo
+coordinatore; resta nascosta fino all'uscita dalla propria area.
+M/S seguono il nome prima delle frecce; le piccole icone attive si impaginano sotto
+le frecce. Le lane di eventi misurano i widget: 24 px per una banda di punti,
+32 px per uno span con barra di taglio, crescita solo per sovrapposizioni reali.
+La card passa automaticamente a una riga nelle lane basse, senza determinarne l'altezza.
 
 La build nativa richiede per default i sorgenti visuali originali di Multiverse
 in `AYRA_SOURCE_DIR`. Lo snapshot locale è un opt-out dichiarato nella UI.
 Vedere [contratto della lente](docs/FROSTED_LENS.md) e
 [contratto di navigazione/stato](docs/CARD_STATUS_AND_NAVIGATION.md) e
-[verifica corrente](verification/card-status/STATUS.md).
+[card adattiva e rinomina](docs/ADAPTIVE_CARD_AND_TITLE_EDIT.md) e
+[verifica corrente](verification/adaptive-title/STATUS.md).
 
 ### Utilizzo
 
@@ -37,9 +42,8 @@ le API. Il menu **Visibilità** permette di riattivarli singolarmente e separa l
 navigazione nella card dalla navigazione laterale legacy.
 Nome/gradiente e accento non si possono disattivare dal menu: nome sinistra/destra,
 accento sinistra/destra/entrambi. La lente ha la sola scomparsa temporanea
-content-aware descritta sopra. Anche il doppio click raggiunge il canvas: nessun
-editor del nome viene aperto. Il bordo inferiore ridimensiona soltanto
-le lane manuali. Marker, Metrica e Counter restano compatti.
+content-aware descritta sopra. Fuori dal nome e dalle frecce anche il doppio click raggiunge il canvas. Il bordo inferiore ridimensiona soltanto
+le lane manuali. Marker, Metrica, Counter, point e span sono dimensionati automaticamente dal contenuto.
 Riattivando i controlli laterali, ogni lato conserva il proprio unico well recessed. Le frecce sono
 i chevron singoli `<`/`>`, non icone di trasporto. Gli accenti laterali usano
 soltanto il colore della traccia: il colore tipo resta nel pallino della card.

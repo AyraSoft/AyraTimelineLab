@@ -1,4 +1,5 @@
 #pragma once
+#include "../keyframe/ayra_KeyframeRowLayout.h"
 
 namespace ayra::lab::clips
 {
@@ -2937,11 +2938,6 @@ struct KeyframeEventVisual
 
 namespace keyframe_lane_layout
 {
-    static constexpr float padY = 3.0f;
-    static constexpr float pillHeight = 18.0f;
-    static constexpr float rowGap = 4.0f;
-    static constexpr int maxRows = 6;
-
     /** Rettangolo visuale canonico del LookAndFeel.
         Per gli span la larghezza deriva dal prossimo evento; per i point dal testo.
         Le hit-zone restano deliberate responsabilita' del canvas, cosi' un cambio
@@ -2958,8 +2954,8 @@ namespace keyframe_lane_layout
         const float width = spanMode ? juce::jmax (1.0f, x1 - x0)
                                      : juce::jmax (22.0f, event.pillWidth);
         const float y = laneBounds.getY() + padY
-                      + static_cast<float> (juce::jlimit (0, maxRows - 1, event.visualRow))
-                        * (pillHeight + rowGap);
+                      + static_cast<float> (juce::jmax (0, event.visualRow))
+                        * (pillHeight + (spanMode ? spanRowGap : rowGap));
         return { x0, y, width, pillHeight };
     }
 }

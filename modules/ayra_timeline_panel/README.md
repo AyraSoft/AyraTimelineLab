@@ -1,7 +1,8 @@
-> Current contract: names and state indicators are passive, only previous/next
-> in the card intercept input. One panel scheduler hides the card after 500 ms
-> over real editable content, protected by navigation hover; no per-row timer.
-> See `../../docs/CARD_STATUS_AND_NAVIGATION.md`.
+> Current contract: only the track title and navigation intercept input. Title
+> hover protects/expands the lens; double click renames its owner through the host.
+> One panel scheduler hides passive areas after 500 ms over editable content.
+> Automatic event lanes measure the widgets, never the card. See
+> `../../docs/ADAPTIVE_CARD_AND_TITLE_EDIT.md`.
 
 # Ayra Timeline Panel — no-header presentation
 
@@ -39,7 +40,8 @@ musical data. Structured layout groups contain whole owners; free groups contain
 lane IDs; switching modes never widens a partial group silently.
 
 Snapshot owner/lane/event IDs remain external identities. Commands carry session,
-revision, owner and the relevant lane/event scope. Rename changes a lane label;
+revision, owner and the relevant lane/event scope. Inline title edits use renameOwner;
+the separate renameLane API continues to change only a lane alias;
 M/S/Monitoring/Open address its owner. Song Main has no Solo. Previous/next address
 the lane, not every lane of that owner. The host admits commands atomically.
 
@@ -58,10 +60,13 @@ row. Clip IDs outside the viewport remain known, while actual deletion prunes st
 
 `containsEditableAt` uses the exact canvas input geometry (clips, points, span
 edges, curve segments and handles). `containsClipAt` remains a compatibility
-fallback. Missing callbacks never invent editable regions. Passive text does not
-intercept events or own an editor. The card's two navigation children have 16x18
-logical-pixel targets; hidden cards have no invisible buttons. `eventTimes` supplies
+fallback. Missing callbacks never invent editable regions. Performer/type/status remain passive. The actual title hit region protects the
+card and owns a lazy inline editor. Navigation uses 16x18 targets, or 16x12 in a
+compact 22px card with active status glyphs beneath; hidden cards have no invisible buttons. `eventTimes` supplies
 local editor targets; otherwise the controller uses canonical snapshot events.
+`setContentChangeListener` reports programmatic content changes independently of a
+frame revision. Unregister the listener at teardown. `preferredHeight` is a pure
+content measurement, and repeated identical values do not cause recursive binds.
 
 `Owner::status` is a read-only host projection, shared by every lane of that owner.
 The seven effective booleans do not change the monitoring policy, document flags or
@@ -90,11 +95,11 @@ The demo explicitly supplies synthetic readback, disabled by default.
 ## Scope of verification
 
 The actual native panel is tested with instrumented canvases for hit regions,
-passive identity/navigation/status, compact/manual/automatic height, identity changes, common X,
+title editing/passive metadata/navigation/status, compact/manual/automatic height, identity changes, common X,
 viewport width, hide/reveal and 10,000 logical rows. The maximum observed residency
 is 15 in that fixed workload. This is **not** a frame-time benchmark of 10,000 real
 Audio/MIDI canvases. The real demo was separately launched and captured on Linux.
-See `../../verification/card-status/STATUS.md` for current runs and limitations.
+See `../../verification/adaptive-title/STATUS.md` for current runs and limitations.
 Older full-application evidence remains scoped to its original revision.
 
 ## Porting
