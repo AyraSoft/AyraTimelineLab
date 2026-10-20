@@ -88,6 +88,22 @@ void ClipDefaultLookAndFeel::drawAutomationCurve (
     // 2. Riempimento selezionato dal consumer; la ricetta resta nel modulo ayra_ui.
     timelineLaf.drawTimelineAutomationCurveUnderlay (g, envLine, b, p.underlayStyle);
 
+    // Fade boundaries intentionally reject point insertion. Mark only those
+    // boundary segments with a fine dashed overlay, not the editable curve.
+    const auto markNonInsertableFade = [&] (const auto& segment)
+    {
+        juce::Path fadePath;
+        fadePath.startNewSubPath (segment.start);
+        appendBoundedCurvePixelSegment (fadePath, segment);
+        juce::Path dashed;
+        constexpr float dashes[] { 2.0f, 3.0f };
+        juce::PathStrokeType (1.35f).createDashedStroke (dashed, fadePath, dashes, 2);
+        g.setColour (p.curveColour.contrasting (0.55f).withAlpha (0.74f));
+        g.fillPath (dashed);
+    };
+    if (boundaryGeometry.hasFadeIn) markNonInsertableFade (boundaryGeometry.fadeIn);
+    if (boundaryGeometry.hasFadeOut) markNonInsertableFade (boundaryGeometry.fadeOut);
+
     // Gli anchor interni (es. neutral 0.5 per ModWheel/Pitch) hanno una guida
     // leggera indipendente dalla curva effettiva. Non partecipa all'hit-test.
     if (boundaryGeometry.showGuide)
