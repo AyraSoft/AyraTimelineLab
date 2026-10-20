@@ -1,0 +1,86 @@
+-- The C compiler identification is GNU 14.2.0
+-- The CXX compiler identification is GNU 14.2.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Ayra visual source: ayra_ui snapshot (not live Multiverse)
+-- Configuring done (7.5s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/adaptive-work/build-release
+[1/11] Building CXX object CMakeFiles/ayra_lab_core.dir/generated/FixtureData.cpp.o
+[2/11] Building CXX object CMakeFiles/ayra_event_layout_tests.dir/tests/EventRowLayoutTests.cpp.o
+[3/11] Building CXX object CMakeFiles/ayra_lab_core.dir/core/LabModel.cpp.o
+[4/11] Linking CXX static library libayra_lab_core.a
+[5/11] Building CXX object CMakeFiles/ayra_lab_tests.dir/tests/CoreTests.cpp.o
+[6/11] Building CXX object CMakeFiles/ayra_timeline_panel_tests.dir/tests/TimelinePanelTests.cpp.o
+[7/11] Linking CXX executable ayra_event_layout_tests
+[8/11] Linking CXX executable ayra_lab_tests
+[9/11] Linking CXX executable ayra_timeline_panel_tests
+[10/11] Building CXX object CMakeFiles/ayra_panel_fixture_tests.dir/tests/PanelFixtureTests.cpp.o
+[11/11] Linking CXX executable ayra_panel_fixture_tests
+Internal ctest changing into directory: /mnt/data/adaptive-work/build-release
+Test project /mnt/data/adaptive-work/build-release
+    Start 1: event_row_layout
+1/5 Test #1: event_row_layout .................   Passed    0.01 sec
+    Start 2: core_regressions
+2/5 Test #2: core_regressions .................   Passed    0.00 sec
+    Start 3: timeline_panel_contracts
+3/5 Test #3: timeline_panel_contracts .........   Passed    0.03 sec
+    Start 4: timeline_fixture_transactions
+4/5 Test #4: timeline_fixture_transactions ....   Passed    0.02 sec
+    Start 5: fixture_sources
+5/5 Test #5: fixture_sources ..................   Passed    1.15 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Total Test time (real) =   1.21 sec
+-- The C compiler identification is Clang 17.0.0
+-- The CXX compiler identification is Clang 17.0.0
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/local/swift/usr/bin/clang - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/local/swift/usr/bin/clang++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Ayra visual source: ayra_ui snapshot (not live Multiverse)
+-- Configuring done (9.6s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/adaptive-work/build-sanitize
+[1/11] Building CXX object CMakeFiles/ayra_lab_core.dir/generated/FixtureData.cpp.o
+[2/11] Building CXX object CMakeFiles/ayra_lab_core.dir/core/LabModel.cpp.o
+[3/11] Linking CXX static library libayra_lab_core.a
+[4/11] Building CXX object CMakeFiles/ayra_event_layout_tests.dir/tests/EventRowLayoutTests.cpp.o
+[5/11] Building CXX object CMakeFiles/ayra_lab_tests.dir/tests/CoreTests.cpp.o
+[6/11] Building CXX object CMakeFiles/ayra_timeline_panel_tests.dir/tests/TimelinePanelTests.cpp.o
+[7/11] Linking CXX executable ayra_event_layout_tests
+[8/11] Linking CXX executable ayra_lab_tests
+[9/11] Linking CXX executable ayra_timeline_panel_tests
+[10/11] Building CXX object CMakeFiles/ayra_panel_fixture_tests.dir/tests/PanelFixtureTests.cpp.o
+[11/11] Linking CXX executable ayra_panel_fixture_tests
+Internal ctest changing into directory: /mnt/data/adaptive-work/build-sanitize
+Test project /mnt/data/adaptive-work/build-sanitize
+    Start 1: event_row_layout
+1/5 Test #1: event_row_layout .................   Passed    0.09 sec
+    Start 2: core_regressions
+2/5 Test #2: core_regressions .................   Passed    0.05 sec
+    Start 3: timeline_panel_contracts
+3/5 Test #3: timeline_panel_contracts .........   Passed    0.33 sec
+    Start 4: timeline_fixture_transactions
+4/5 Test #4: timeline_fixture_transactions ....   Passed    0.26 sec
+    Start 5: fixture_sources
+5/5 Test #5: fixture_sources ..................   Passed    1.07 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Total Test time (real) =   1.80 sec

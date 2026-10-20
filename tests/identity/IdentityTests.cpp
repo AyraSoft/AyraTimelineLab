@@ -65,7 +65,7 @@ juce::Image showcase(bool dark,float scale,bool left)
     const auto layout=TimelineIdentityLayout::make(bounds,global,TimelineIdentityArtwork::typography());
     TimelineIdentityArtwork::draw(g,global,layout,TimelineIdentityArtwork::prepare(global,layout));
     g.setColour(dark?juce::Colour(0xff94a3b8):juce::Colour(0xff58677c));g.setFont(juce::Font(juce::FontOptions().withHeight(10)));
-    g.drawText("Fixture JUCE: lens 144-229 px / non editabile / nessun header / palette di tipo indipendente",18,387,900,18,juce::Justification::centredLeft);
+    g.drawText("Fixture JUCE: nome protetto e rinominabile / nessun header / palette di tipo indipendente",18,387,900,18,juce::Justification::centredLeft);
     return image;
 }
 juce::Image groupedShowcase(bool dark, bool namesOnLeft)
@@ -149,6 +149,79 @@ juce::Image statusShowcase(bool dark,bool left,float scale)
     return image;
 }
 
+// The same material and typography at the exact event-widget heights. No
+// image mockup renderer: these call the live identity painter and real buttons.
+juce::Image adaptiveShowcase(bool dark,bool left)
+{
+    using namespace ayra::lab;
+    ayra::tokens::setThemeMode(dark?ayra::tokens::Mode::Dark:ayra::tokens::Mode::Light);
+    juce::Image image(juce::Image::ARGB,1160,420,true);juce::Graphics g(image);
+    g.fillAll(dark?juce::Colour(0xff090c12):juce::Colour(0xfff4f6fa));
+    g.setColour(ayra::tokens::textPrimary());g.setFont(ayra::tokens::type::body().boldened());
+    g.drawText("Altezza dal contenuto / card adattiva / stati sotto le frecce",16,10,1120,24,juce::Justification::centredLeft);
+    int y=45;const std::array<int,5> heights{24,32,46,96,64};
+    for(int i=0;i<5;++i){
+        const juce::Rectangle<int> row(16,y,1128,heights[i]);
+        const auto tint=i==0?ayra::tokens::streamOsc():i==1?ayra::tokens::streamDmx():ayra::tokens::streamAudio();
+        g.setColour(dark?juce::Colour(0xff101520):juce::Colour(0xffdde4ef));g.fillRect(row);
+        g.setColour(juce::Colour(0xff5bb6bd));g.fillRect(row.withWidth(6));
+        if(i<=2){
+            const int count=i==1?3:5;
+            for(int n=0;n<count;++n){
+                const int x=row.getX()+8+(i==1?n*360:n*205);
+                const int py=row.getY()+3+((i==2&&n%2)?22:0);
+                const auto pill=juce::Rectangle<int>(x,py,i==1?358:85,18);
+                g.setColour(tint.withAlpha(.60f));g.fillRoundedRectangle(pill.toFloat(),4);
+                g.setColour(ayra::tokens::textPrimary());g.setFont(juce::Font(juce::FontOptions().withHeight(11)));
+                g.drawText(i==1?"Verse "+juce::String(n+1):"PC "+juce::String(n+1),pill,juce::Justification::centred);
+                if(i==1){g.setColour(tint.withAlpha(.3f));g.fillRect(x,py+20,358,4);}
+            }
+        }
+        TimelineIdentityContent c;c.performer="Noah";c.track=i<3?"Lights":"Backing vocals with a complete, intentionally long track name";
+        c.type=i==0?"OSC":i==1?"DMX":i==2?"Text":"Audio";c.typeColour=tint;c.navigation=true;c.onLeft=left;
+        c.muted=i==0||i>=3;c.soloed=i==4;if(i==0||i==3)c.status={true,true,true,true,true,true,true};
+        c.expanded=i==4;
+        const auto l=TimelineIdentityLayout::make(row.withTrimmedLeft(8),c,TimelineIdentityArtwork::typography());
+        const auto sample=l.backdrop.expanded(15).getIntersection(row);
+        const auto pix=image.getClippedImage(sample).createCopy();
+        const auto blur=TimelineIdentityArtwork::prepareUnderlay(pix,1,l,sample);
+        TimelineIdentityArtwork::drawUnderlay(g,l,blur,sample);
+        TimelineIdentityArtwork::draw(g,c,l,TimelineIdentityArtwork::prepare(c,l));
+        for(int n=0;n<2;++n){
+            auto b=TimelineLaneControls::makeButton(n==0?LaneButton::previous:LaneButton::next);
+            b->setBounds(n==0?l.previous:l.next);g.drawImageAt(b->createComponentSnapshot(b->getLocalBounds()),b->getX(),b->getY());
+        }
+        y+=heights[i]+6;
+    }
+    g.setColour(ayra::tokens::textSecondary());g.setFont(ayra::tokens::type::caption());
+    g.drawText("Fixture nativa JUCE / 24, 32, 46, 96 e 64 px / ultima card espansa solo in orizzontale",16,375,1120,22,juce::Justification::centredLeft);
+    return image;
+}
+void adaptiveGeometryContracts()
+{
+    const auto fonts=TimelineIdentityArtwork::typography();
+    for(bool left:{false,true})for(int height:{24,32,39,40,46,64,400}) {
+        TimelineIdentityContent c;c.performer="Noah";c.track="Lights";c.type="OSC";c.onLeft=left;c.navigation=true;c.muted=c.soloed=true;
+        c.status={true,true,true,true,true,true,true};
+        auto l=TimelineIdentityLayout::make({0,0,800,height},c,fonts);
+        CHECK(l.twoLines==(height>=40));CHECK(l.backdrop.getHeight()==(height<40?22:40));
+        CHECK(l.trackFont== (height<40?fonts.type:fonts.track));
+        CHECK(l.mute.getRight()<l.previous.getX());CHECK(l.solo.getRight()<l.previous.getX());
+        for(auto r:l.indicators){CHECK(!r.isEmpty());CHECK(r.getY()>=l.navigationGroup.getBottom());CHECK(l.backdrop.contains(r));}
+        for(auto r:{l.performer,l.type,l.typeMark,l.mute,l.solo,l.previous,l.next})CHECK(!l.titleHit.intersects(r));
+        CHECK(l.track.contains(l.titleHit));
+        c.track="Full original track title which must be readable rather than truncated when hovered";
+        const auto compact=TimelineIdentityLayout::make({0,0,1100,height},c,fonts);CHECK(compact.titleTruncated);
+        c.expanded=true;const auto wide=TimelineIdentityLayout::make({0,0,1100,height},c,fonts);
+        CHECK(wide.backdrop.getWidth()>compact.backdrop.getWidth());CHECK(!wide.titleTruncated);
+        CHECK(wide.backdrop.getHeight()==compact.backdrop.getHeight());
+        CHECK(wide.backdrop.getCentreY()==compact.backdrop.getCentreY());
+        CHECK(left?wide.backdrop.getX()==compact.backdrop.getX():wide.backdrop.getRight()==compact.backdrop.getRight());
+        const auto narrow=TimelineIdentityLayout::make({0,0,140,height},c,fonts);
+        CHECK(narrow.backdrop.getWidth()<=140);CHECK(narrow.titleTruncated);
+    }
+}
+
 }
 int main(int argc,char** argv)
 {
@@ -204,7 +277,7 @@ int main(int argc,char** argv)
         CHECK(!c.muted||l.mute.getX()>l.track.getRight());CHECK(!c.soloed||l.solo.getX()>l.track.getRight());
         const auto active=activeTrackIndicators(c.status);
         for(std::size_t i=0;i<active.size();++i){CHECK(l.indicators[i].isEmpty()==!active[i]);
-            if(active[i]){CHECK(l.indicators[i].getWidth()==6);CHECK(l.indicators[i].getRight()<l.track.getX());}}
+            if(active[i]){CHECK(l.indicators[i].getWidth()==6);CHECK(l.indicators[i].getY()>=l.navigationGroup.getBottom() && !l.indicators[i].intersects(l.track));}}
     }
     for(bool dark:{true,false})for(bool left:{false,true})
         writePng(output.getChildFile(juce::String("grouped-")+(dark?"dark-":"light-")+(left?"left":"right")+".png"),groupedShowcase(dark,left));
@@ -230,6 +303,9 @@ int main(int argc,char** argv)
     }
     for(bool dark:{true,false})for(bool left:{false,true})for(float scale:{1.0f,2.0f})
         writePng(output.getChildFile(juce::String("status-")+(dark?"dark-":"light-")+(left?"left-":"right-")+juce::String(scale,1)+".png"),statusShowcase(dark,left,scale));
+    adaptiveGeometryContracts();
+    for(bool dark:{true,false})for(bool left:{false,true})
+        writePng(output.getChildFile(juce::String("adaptive-")+(dark?"dark-":"light-")+(left?"left":"right")+".png"),adaptiveShowcase(dark,left));
     ayra::shadowCache().clear();juce::ImageCache::releaseUnusedImages();
     std::cout<<"PASS "<<checks<<" frosted lens layout/render/hover assertions; native JUCE painter fixtures\n";
 }

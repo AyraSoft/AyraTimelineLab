@@ -1,0 +1,16 @@
+Internal ctest changing into directory: /mnt/data/adaptive-work/build-core
+Test project /mnt/data/adaptive-work/build-core
+    Start 1: event_row_layout
+1/5 Test #1: event_row_layout .................   Passed    0.02 sec
+    Start 2: core_regressions
+2/5 Test #2: core_regressions .................   Passed    0.01 sec
+    Start 3: timeline_panel_contracts
+3/5 Test #3: timeline_panel_contracts .........   Passed    0.10 sec
+    Start 4: timeline_fixture_transactions
+4/5 Test #4: timeline_fixture_transactions ....   Passed    0.11 sec
+    Start 5: fixture_sources
+5/5 Test #5: fixture_sources ..................   Passed    1.07 sec
+
+100% tests passed, 0 tests failed out of 5
+
+Total Test time (real) =   1.31 sec

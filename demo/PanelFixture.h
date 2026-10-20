@@ -111,7 +111,11 @@ inline Session makePanelFixture()
         {"song-main.audio","song-main","main.audio-bus","Audio",S::audio,V::audio}
     };
     for(auto& lane:m->lanes) {
-        if(lane.stream==S::global&&lane.id!="tempo")lane.heightPolicy=panel::HeightPolicy::compact;
+        if(lane.visual==V::point||lane.visual==V::span) {
+            lane.heightPolicy=panel::HeightPolicy::automatic;
+            lane.initialHeight=lane.minimumHeight=lane.visual==V::point?24:32;
+            lane.maximumHeight=10000;
+        }
         if(lane.stream!=S::global){lane.inputMeterCount=2;lane.outputMeterCount=2;}
     }
     // Legacy canvases consume one Lab Track per lane. These are explicit compatibility

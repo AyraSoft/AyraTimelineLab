@@ -12,7 +12,10 @@ assert '#include <ayra_timeline/ayra_timeline_presentation.h>' in model
 assert 'LabComponent' not in surface and 'LabModel' not in surface
 assert 'TimelineRowResidency' in surface and 'controller.visitRows' in surface
 assert 'layoutTimelineLaneChrome' in surface
-assert 'NameInput' not in surface and 'nameEditor' not in surface and 'beginRename' not in surface
+assert 'TitleInput' in surface and 'beginTitleEdit' in surface and 'titleHit' in surface
+assert 'controller.renameOwner' in surface and 'editOriginal' in surface
+assert 'setContentChangeListener' in demo and 'applyAutoHeight' in surface
+assert 'packVisibleRows' in (root/'app/clips/keyframe/ayra_KeyframeLaneCanvas.cpp').read_text()
 assert 'containsClipAt' in surface and 'containsEditableAt' in surface and 'PointerObserver' in surface
 assert surface.count('private juce::Timer')==1
 assert 'identityDue' in surface and 'scheduleIdentity' in surface

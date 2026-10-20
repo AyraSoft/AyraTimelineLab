@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <set>
 #include <tuple>
+#include <unordered_map>
 #include <cmath>
 #include "clips/audio/ayra_AudioClipCanvas.cpp"
 #include "clips/midi/ayra_MidiClipCanvas.cpp"

@@ -56,6 +56,10 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
         result.containsEditableAt=[raw](juce::Point<float> point){return raw->containsPanelEditableAt(point);};
     if constexpr(requires {raw->containsPanelClipAt(juce::Point<float>{});})
         result.containsClipAt=[raw](juce::Point<float> point){return raw->containsPanelClipAt(point);};
+    if constexpr(requires {raw->preferredPanelHeight(0);})
+        result.preferredHeight=[raw](int width){return raw->preferredPanelHeight(width);};
+    if constexpr(requires {raw->onPanelContentChanged;})
+        result.setContentChangeListener=[raw](std::function<void()> listener){raw->onPanelContentChanged=std::move(listener);};
     result.saveState=[raw,&states,key]{states[key]=raw->capturePanelState();};
     result.hasInteraction=[raw]{return raw->isMouseButtonDown(true)||raw->hasKeyboardFocus(true);};
     if constexpr(requires {raw->panelEventTimes();})result.eventTimes=[raw]{return raw->panelEventTimes();};

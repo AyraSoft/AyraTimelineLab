@@ -48,6 +48,10 @@ public:
     {std::vector<double> result;for(const auto& e:events)result.push_back(e.startSec);return result;}
 
 
+    // Installed by the host; no timer or document write belongs to this canvas.
+    std::function<void()> onPanelContentChanged;
+    int preferredPanelHeight(int) const noexcept { return preferredHeight; }
+
     enum class HitZone
     {
         none,
@@ -299,28 +303,30 @@ private:
             cachedVisualEvents.push_back (vev);
         }
 
-        if (laneType == KeyframeLaneType::points)
-        {
-            float lastRight[clips::keyframe_lane_layout::maxRows];
-            for (auto& right : lastRight) right = -1.0e9f;
-
-            const auto laneBounds = keyframeLaneBoundsInCanvas();
-            for (auto& event : cachedVisualEvents)
-            {
-                const float x = laneBounds.getX() + event.startNormX * laneBounds.getWidth();
-                int row = clips::keyframe_lane_layout::maxRows - 1;
-                for (int candidate = 0; candidate < clips::keyframe_lane_layout::maxRows; ++candidate)
-                {
-                    if (x >= lastRight[candidate] + 2.0f)
-                    {
-                        row = candidate;
-                        break;
-                    }
-                }
-                event.visualRow = row;
-                lastRight[row] = juce::jmax (lastRight[row], x + event.pillWidth);
-            }
+        // The same projected rectangles drive painting, hit-testing and height.
+        // Use only the screen-visible intervals; adjacent spans are half-open.
+        const auto bounds=keyframeLaneBoundsInCanvas();
+        const bool span=laneType!=KeyframeLaneType::points;
+        std::vector<clips::keyframe_lane_layout::VisualInterval> intervals;
+        intervals.reserve(cachedVisualEvents.size());
+        for(std::size_t i=0;i<cachedVisualEvents.size();++i) {
+            auto& event=cachedVisualEvents[i];event.visualRow=0;
+            const double x=bounds.getX()+event.startNormX*bounds.getWidth();
+            const double right=span?bounds.getX()+event.endNormX*bounds.getWidth():x+event.pillWidth;
+            intervals.push_back({i,x,juce::jmax(x+1.0,right)+(span?0.0:2.0)});
         }
+        if(panelView.enabled&&hasDragSnapshot&&!dragRows.empty()) {
+            for(std::size_t i=0;i<cachedVisualEvents.size();++i)
+                if(const auto found=dragRows.find(events[i].id);found!=dragRows.end())
+                    cachedVisualEvents[i].visualRow=found->second;
+        } else {
+            const auto packed=clips::keyframe_lane_layout::packVisibleRows(std::move(intervals),getWidth());
+            for(const auto& item:packed.placements)cachedVisualEvents[item.source].visualRow=item.row;
+            preferredHeight=clips::keyframe_lane_layout::contentHeight(packed.rows,span);
+        }
+        layoutLaneComponent();
+        if(laneComponent)laneComponent->repaint();
+        if(panelView.enabled&&onPanelContentChanged)onPanelContentChanged();
     }
 
     [[nodiscard]] KeyframeLaneVisual makeKeyframeLaneVisual (
@@ -353,9 +359,9 @@ private:
 
     [[nodiscard]] juce::Rectangle<float> keyframeLaneBoundsInCanvas() const noexcept
     {
-        return panelView.domainBounds({ 4.0f, 4.0f,
+        return panelView.domainBounds({ 4.0f, panelView.enabled ? 0.0f : 4.0f,
                  juce::jmax (1.0f, static_cast<float> (getWidth()) - 8.0f),
-                 juce::jmax (14.0f, static_cast<float> (height) - 8.0f) });
+                 juce::jmax (14.0f, static_cast<float> (height) - (panelView.enabled ? 0.0f : 8.0f)) });
     }
 
     HitInfo hitTestEvent (juce::Point<float> p) const
@@ -424,7 +430,7 @@ private:
         const auto zone = timelineZoneForHit (hit.zone);
         const bool canErase = hit.index >= 0
             && (laneType != KeyframeLaneType::contiguousSpans || events.size() > 1);
-        const auto role = hit.zone == HitZone::none
+        const auto role = !panelView.enabled && hit.zone == HitZone::none
             && e.position.y >= getHeight() - 6.0f
             ? clips::TimelineCursorRole::verticalResize
             : clips::resolveTimelineCursorRole ({ zone, e.mods.isAltDown(),
@@ -457,7 +463,7 @@ private:
     {
         grabKeyboardFocus();
 
-        if (e.mods.isLeftButtonDown()
+        if (!panelView.enabled && e.mods.isLeftButtonDown()
             && e.position.y >= getHeight() - 6.0f)
         {
             isResizingLaneHeight = true;
@@ -591,6 +597,10 @@ private:
             events[idx].selected = true;
         }
 
+        dragRows.clear();
+        if(panelView.enabled)
+            for(std::size_t i=0;i<events.size()&&i<cachedVisualEvents.size();++i)
+                dragRows.emplace(events[i].id,cachedVisualEvents[i].visualRow);
         activeDragZone   = hit.zone;
         draggedEventIdx  = hit.index;
         draggedEventId   = events[idx].id;
@@ -936,6 +946,8 @@ private:
         draggedEventIdx = -1;
         draggedEventId  = 0;
         hasDragSnapshot = false;
+        dragRows.clear();
+        rebuildVisualCache();
         repaint();
     }
 
@@ -1130,6 +1142,7 @@ private:
     LabComponent& host;
     Track data;
     int height = 44;
+    int preferredHeight = 24;
     bool programAudible = true;
     KeyframeLaneType laneType = KeyframeLaneType::contiguousSpans;
 
@@ -1137,6 +1150,7 @@ private:
     std::vector<KeyframeSourceEvent> events;
     std::vector<KeyframeSourceEvent> snapshotEvents;
     std::vector<KeyframeEventVisual> cachedVisualEvents;
+    std::unordered_map<int,int> dragRows; // stable visual rows until mouse-up
 
     std::unique_ptr<KeyframeLaneComponent> laneComponent;
     std::unique_ptr<juce::TextEditor> inlineEditor;
