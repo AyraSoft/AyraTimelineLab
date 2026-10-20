@@ -21,7 +21,7 @@ NCPU="${CMAKE_BUILD_PARALLEL_LEVEL:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || e
 # Existing CMake paths can be reused; environment values take precedence.
 cache_path() {
     if [[ -f "$BUILD_DIR/CMakeCache.txt" ]]; then
-        sed -n "s|^$1:PATH=||p" "$BUILD_DIR/CMakeCache.txt" | head -n 1
+        sed -n "s|^$1:[^=]*=||p" "$BUILD_DIR/CMakeCache.txt" | head -n 1
     fi
 }
 JUCE_DIR="${JUCE_SOURCE_DIR:-$(cache_path JUCE_SOURCE_DIR)}"
