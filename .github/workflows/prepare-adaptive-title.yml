@@ -95,6 +95,13 @@ jobs:
           subprocess.run(['python3', 'tests/identity/test_visual_adapter.py'], check=True)
           subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Wpedantic', 'tests/EventRowLayoutTests.cpp', '-o', '/tmp/ayra-event-layout'], check=True)
           subprocess.run(['/tmp/ayra-event-layout'], check=True)
+          # The Actions token cannot publish workflows. Restore this one path;
+          # the authenticated connector will publish its verified blob separately.
+          workflow = '.github/workflows/portable-validation.yml'
+          print('WORKFLOW_BLOB=' + git('rev-parse', ':' + workflow).decode().strip())
+          git('restore', '--source', BASE, '--staged', '--worktree', '--', workflow)
+          staged = set(git('diff', '--cached', '--name-only', '-z').decode().strip('\0').split('\0'))
+          assert staged == ALLOWED - {workflow}
           tree = git('write-tree').decode().strip()
           git('config', 'user.name', 'Ayra Soft')
           git('config', 'user.email', '131635008+AyraSoft@users.noreply.github.com')
