@@ -1,0 +1,106 @@
+name: Prepare verified adaptive title source
+on:
+  push:
+    branches: ['work/adaptive-title-transfer-20261020']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct and check reviewed sources on a separate ready branch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          BASE = '8eceba72bbf14daa2d0dd750f7e24cb833030dc0'
+          DIGEST = '0b75f90dce2c896f263c327b6de5cb125880e74b6fea9fd764ad5a53b665f887'
+          READY = 'work/adaptive-title-ready-20261020'
+          ALLOWED = set('''.github/workflows/portable-validation.yml
+          CMakeLists.txt
+          README.md
+          app/LabComponent.cpp
+          app/clips/keyframe/ayra_KeyframeLaneCanvas.cpp
+          app/clips/keyframe/ayra_KeyframeRowLayout.h
+          app/clips/visual/ayra_ClipVisual.h
+          demo/PanelFixture.h
+          demo/TimelinePanelDemo.cpp
+          docs/ADAPTIVE_CARD_AND_TITLE_EDIT.md
+          docs/CARD_STATUS_AND_NAVIGATION.md
+          modules/ayra_timeline_panel/README.md
+          modules/ayra_timeline_panel/TimelineIdentity.h
+          modules/ayra_timeline_panel/TimelinePanel.h
+          tests/EventRowLayoutTests.cpp
+          tests/NativePanelTests.cpp
+          tests/identity/IdentityTests.cpp
+          tools/check_panel_boundary.py
+          verification/adaptive-title/STATUS.md
+          verification/adaptive-title/core-debug.log
+          verification/adaptive-title/core-release-sanitizers.log
+          verification/adaptive-title/native-assertions.log
+          verification/adaptive-title/native.log'''.splitlines())
+          def git(*args, **kwargs):
+              return subprocess.check_output(['git', *args], **kwargs)
+          def blob_hash(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+          encoded = ''.join(pathlib.Path(f'.publication/adaptive-{i}.b64').read_text() for i in range(4))
+          raw = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert len(raw) == 67622 and hashlib.sha256(raw).hexdigest() == DIGEST
+          manifest = json.loads(raw)
+          assert manifest['base'] == BASE and len(manifest['files']) == 23
+          assert {f['p'] for f in manifest['files']} == ALLOWED
+          remote = git('ls-remote', 'origin', 'refs/heads/main').decode().split()[0]
+          assert remote == BASE, 'Main changed: inspect and rebase, never overwrite'
+          git('checkout', '--detach', BASE)
+          seen = set()
+          for item in manifest['files']:
+              path = pathlib.PurePosixPath(item['p'])
+              assert not path.is_absolute() and '..' not in path.parts
+              assert path.parts[0] not in ('.git', '.publication')
+              assert path.parts[0] != '.github' or str(path) == '.github/workflows/portable-validation.yml'
+              assert str(path) not in seen
+              seen.add(str(path))
+              previous = subprocess.run(['git', 'show', BASE + ':' + str(path)], capture_output=True)
+              old = previous.stdout if previous.returncode == 0 else b''
+              if item['b'] is None:
+                  assert previous.returncode != 0, 'Unexpected existing path: ' + str(path)
+              else:
+                  assert previous.returncode == 0 and blob_hash(old) == item['b'], 'Base blob mismatch: ' + str(path)
+              data = old.decode('utf-8').splitlines(keepends=True)
+              old_length = len(data)
+              previous_start = old_length + 1
+              for start, end, replacement in reversed(item['e']):
+                  assert 0 <= start <= end <= old_length and end <= previous_start
+                  previous_start = start
+                  data[start:end] = replacement.splitlines(keepends=True)
+              result = ''.join(data).encode('utf-8')
+              assert blob_hash(result) == item['n'], 'New blob mismatch: ' + str(path)
+              destination = pathlib.Path(path)
+              assert not destination.is_symlink()
+              assert all(not parent.is_symlink() for parent in destination.parents)
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_bytes(result)
+              if item['b'] is None:
+                  destination.chmod(0o644)
+              git('add', '-f', '--', str(path))
+          staged = set(git('diff', '--cached', '--name-only', '-z').decode().strip('\0').split('\0'))
+          assert staged == ALLOWED, 'Unexpected staged paths'
+          for item in manifest['files']:
+              assert git('rev-parse', ':' + item['p']).decode().strip() == item['n']
+          subprocess.run(['python3', 'tools/check_panel_boundary.py'], check=True)
+          subprocess.run(['python3', 'tests/identity/test_visual_adapter.py'], check=True)
+          subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Wpedantic', 'tests/EventRowLayoutTests.cpp', '-o', '/tmp/ayra-event-layout'], check=True)
+          subprocess.run(['/tmp/ayra-event-layout'], check=True)
+          tree = git('write-tree').decode().strip()
+          git('config', 'user.name', 'Ayra Soft')
+          git('config', 'user.email', '131635008+AyraSoft@users.noreply.github.com')
+          commit = git('commit-tree', tree, '-p', BASE, '-m', 'Prepare tested adaptive event lanes and protected editable track titles').decode().strip()
+          git('push', 'origin', commit + ':refs/heads/' + READY)
+          print('VERIFIED_TREE=' + tree)
+          print('READY_COMMIT=' + commit)
+          print('Main is unchanged; publication remains a separate guarded connector action.')
+          PY
