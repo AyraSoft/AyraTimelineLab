@@ -1,0 +1,18 @@
+-- Ayra visual source: ayra_ui snapshot (not live Multiverse)
+-- Checking for modules 'webkit2gtk-4.0;gtk+-x11-3.0'
+--   Package 'webkit2gtk-4.0', required by 'virtual:world', not found
+--   Package 'gtk+-x11-3.0', required by 'virtual:world', not found
+-- Configuring juceaide
+-- Building juceaide
+-- Exporting juceaide
+-- Testing juceaide
+-- Finished setting up juceaide
+-- Configuring done (5.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/lane-polish/build-identity
+[  4%] Building CXX object CMakeFiles/ayra_identity_input_tests.dir/mnt/data/lane-polish/Lab/tests/NativePanelTests.cpp.o
+[  8%] Building CXX object CMakeFiles/ayra_identity_tests.dir/IdentityTests.cpp.o
+[ 13%] Linking CXX executable ayra_identity_tests
+[ 17%] Linking CXX executable ayra_identity_input_tests
+[ 65%] Built target ayra_identity_tests
+[100%] Built target ayra_identity_input_tests

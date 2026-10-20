@@ -1,0 +1,12 @@
+Internal ctest changing into directory: /mnt/data/lens-work/build-identity
+Test project /mnt/data/lens-work/build-identity
+    Start 1: visual_adapter_contracts
+1/3 Test #1: visual_adapter_contracts .........   Passed    0.82 sec
+    Start 2: identity_visual_contracts
+2/3 Test #2: identity_visual_contracts ........   Passed    3.93 sec
+    Start 3: identity_input_contracts
+3/3 Test #3: identity_input_contracts .........   Passed    3.38 sec
+
+100% tests passed, 0 tests failed out of 3
+
+Total Test time (real) =   8.13 sec

@@ -1,8 +1,6 @@
-/** @file TimelineIdentity.h
-    Presentation-only identity overlay. No reserved row height, document writes,
-    provider palette, image blur or interactive child belongs to this layout.
-    Text is ellipsised, never horizontally squeezed. The host owns typography.
-*/
+/** View-only floating identity. Layout follows fixtures/frosted-lens.html.
+    No document writes, mouse interception, reserved row height or media policy.
+    CSS sizes are logical pixels; the host supplies typography and artwork. */
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <cmath>
@@ -11,69 +9,111 @@ namespace ayra::timeline_panel
 {
 struct TimelineIdentityContent
 {
-    juce::String primary, secondary;
+    juce::String performer, track, type;
     juce::Colour ownerColour, typeColour;
     bool compact = false, onLeft = false, selected = false, showType = true;
     bool operator==(const TimelineIdentityContent&) const = default;
 };
 struct TimelineIdentityTypography
 {
-    juce::Font title { juce::FontOptions().withHeight(17.0f).withStyle("Bold") };
-    juce::Font detail { juce::FontOptions().withHeight(11.0f) };
-    juce::Font compact { juce::FontOptions().withHeight(11.5f).withStyle("Bold") };
+    juce::Font track { juce::FontOptions().withPointHeight(12.5f).withStyle("Medium") };
+    juce::Font performer { juce::FontOptions().withPointHeight(9.5f).withStyle("Bold") };
+    juce::Font type { juce::FontOptions().withPointHeight(9.5f) };
 };
 struct TimelineIdentityLayout
 {
-    juce::Rectangle<int> backdrop, primary, secondary, typeMark;
+    // backdrop also defines the STABLE hover footprint, even while invisible.
+    juce::Rectangle<int> backdrop, performer, track, type, typeMark;
     bool twoLines = false;
-    juce::Font primaryFont {juce::FontOptions{}}, secondaryFont {juce::FontOptions{}};
+    juce::Font trackFont {juce::FontOptions{}}, performerFont {juce::FontOptions{}}, typeFont {juce::FontOptions{}};
+    static constexpr int maxWidth = 229; // CSS max-width 205 + horizontal padding 10 + 14
+    static constexpr int minWidth = 144; // CSS min-width 120 + the same padding
+    static constexpr int normalHeight = 40;
 
     static int measuredWidth(const juce::Font& font, const juce::String& text)
     {
+        if (text.isEmpty()) return 0;
         juce::GlyphArrangement glyphs;
         glyphs.addLineOfText(font, text, 0, 0);
         return juce::roundToInt(std::ceil(glyphs.getBoundingBox(0, -1, true).getWidth())) + 2;
     }
     [[nodiscard]] static TimelineIdentityLayout make(
-        juce::Rectangle<int> contentArea, const TimelineIdentityContent& content,
+        juce::Rectangle<int> area, const TimelineIdentityContent& content,
         const TimelineIdentityTypography& fonts)
     {
         TimelineIdentityLayout out;
-        if (contentArea.isEmpty()) return out;
-        const bool dense = content.compact || contentArea.getHeight() < 48;
-        out.primaryFont = dense ? fonts.compact : fonts.title;
-        out.secondaryFont = fonts.detail;
-        out.twoLines = !dense && content.secondary.isNotEmpty();
-        // The overlay floats INSIDE content. No input border, clip X or row size changes.
-        const int edge = juce::jmin(12, contentArea.getWidth() / 8);
-        const int maxText = juce::jmax(0, juce::jmin(280, contentArea.getWidth() - 2 * edge));
-        const int titleWidth = juce::jmin(maxText, measuredWidth(out.primaryFont, content.primary));
-        const int titleHeight = juce::jmin(contentArea.getHeight(), dense ? 18 : 25);
-        const int detailHeight = out.twoLines ? 17 : 0;
-        const int blockHeight = titleHeight + detailHeight;
-        const int top = contentArea.getCentreY() - blockHeight / 2;
-        const auto align = [&](int width, int y, int height) {
-            const int x = content.onLeft ? contentArea.getX() + edge : contentArea.getRight() - edge - width;
-            return juce::Rectangle<int>(x, y, width, height).getIntersection(contentArea);
-        };
-        out.primary = align(titleWidth, top, titleHeight);
-        int detailWidth = 0;
+        out.trackFont = fonts.track;
+        out.performerFont = fonts.performer;
+        out.typeFont = fonts.type;
+        if (area.isEmpty()) return out;
+        out.twoLines = !content.compact && area.getHeight() >= normalHeight;
+        const int insetX = juce::jmin(8, area.getWidth() / 8);
+        const int available = juce::jmax(0, area.getWidth() - 2 * insetX);
+        const int typeWidth = content.showType ? measuredWidth(fonts.type, content.type) : 0;
+        const int typeGroup = typeWidth > 0 ? typeWidth + 9 : 0; // 5px dot + 4px gap
+        const int metaWidth = content.performer.isEmpty() ? typeGroup
+            : measuredWidth(fonts.performer, content.performer.toUpperCase()) + 10 + typeGroup;
+        const int titleWidth = measuredWidth(fonts.track, content.track);
+        const int natural = out.twoLines ? juce::jmax(metaWidth, titleWidth)
+                                         : titleWidth + (typeGroup > 0 ? 10 + typeGroup : 0);
+        const int width = juce::jmin(available, juce::jlimit(minWidth, maxWidth, natural + 38));
+        const int height = juce::jmin(area.getHeight(), out.twoLines ? normalHeight : 22);
+        const int top = area.getY() + (area.getHeight() - height) / 2;
+        out.backdrop = {content.onLeft ? area.getX() + insetX : area.getRight() - insetX - width,
+                        top, width, height};
+        // Leave breathing room beyond the fully transparent left corners.
+        const int leftPad = juce::jmin(24, width / 5), rightPad = juce::jmin(14, width / 5);
+        const auto inner = out.backdrop.withTrimmedLeft(leftPad).withTrimmedRight(rightPad);
+        const auto fit = [&](juce::Rectangle<int> r) { return r.getIntersection(out.backdrop); };
         if (out.twoLines)
         {
-            const int markSpace = content.showType ? juce::jmin(12,maxText) : 0;
-            detailWidth = juce::jmin(juce::jmax(0, maxText - markSpace), measuredWidth(out.secondaryFont, content.secondary));
-            const auto line = align(detailWidth + markSpace, top + titleHeight, detailHeight);
-            out.secondary = line.withTrimmedLeft(markSpace);
-            if (content.showType && line.getWidth() >= 4)
-                out.typeMark = {line.getX(), line.getCentreY() - 2, 4, 4};
+            const auto meta = fit({inner.getX(), top + 5, inner.getWidth(), 12});
+            // Type has priority over performer in a narrow metadata row; track
+            // retains its own full width. Text never stretches or wraps.
+            const int groupWidth = juce::jmin(typeGroup, meta.getWidth());
+            if (groupWidth >= 14)
+            {
+                const auto group = meta.withLeft(meta.getRight() - groupWidth);
+                out.typeMark = {group.getX(), group.getCentreY() - 2, 5, 5};
+                out.type = group.withTrimmedLeft(9);
+            }
+            if (content.performer.isNotEmpty())
+                out.performer = meta.withWidth(juce::jmax(0, meta.getWidth() - groupWidth - (groupWidth > 0 ? 10 : 0)));
+            out.track = fit({inner.getX(), top + 19, inner.getWidth(), 15});
         }
-        const int textWidth = juce::jmax(titleWidth, detailWidth + (content.showType && out.twoLines ? 12 : 0));
-        const int feather = dense ? 28 : 52;
-        const int backingWidth = juce::jmin(contentArea.getWidth(), textWidth + edge + feather);
-        const int backingHeight = juce::jmin(contentArea.getHeight(), blockHeight + (dense ? 4 : 24));
-        out.backdrop = {content.onLeft ? contentArea.getX() : contentArea.getRight() - backingWidth,
-                        contentArea.getCentreY() - backingHeight / 2, backingWidth, backingHeight};
+        else
+        {
+            // Global/short lanes do not grow to accommodate a name. One line,
+            // track first; type drops out before the title becomes illegible.
+            out.track = fit({inner.getX(), top + (height - 15) / 2, inner.getWidth(), 15});
+            if (typeGroup > 0 && inner.getWidth() >= typeGroup + 60)
+            {
+                const auto group = out.track.withLeft(inner.getRight() - typeGroup);
+                out.typeMark = {group.getX(), group.getCentreY() - 2, 5, 5};
+                out.type = group.withTrimmedLeft(9);
+                out.track.setWidth(juce::jmax(0, out.track.getWidth() - typeGroup - 10));
+            }
+        }
         return out;
     }
+};
+
+/** Hide only after a genuine clip hit within the lens. Once suppressed, stay
+    suppressed over gaps/deleted/moved clips until the pointer leaves the same
+    footprint. The painter's visibility never participates in hit testing. */
+class TimelineIdentityHoverState
+{
+public:
+    [[nodiscard]] bool hidden() const noexcept { return suppressed; }
+    bool update(bool inside, bool clipUnderPointer) noexcept
+    {
+        const bool next = inside && (suppressed || clipUnderPointer);
+        const bool changed = next != suppressed;
+        suppressed = next;
+        return changed;
+    }
+    void reset() noexcept { suppressed = false; }
+private:
+    bool suppressed = false;
 };
 } // namespace ayra::timeline_panel

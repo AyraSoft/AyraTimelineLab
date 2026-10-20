@@ -6,18 +6,19 @@ La demo JUCE usa le primitive di presentazione **reali di `ayra_timeline`** e i
 canvas clip del Lab. Nessuna fascia header viene aggiunta alle lane della vista
 libera. Il contenuto scorre nel tempo; nome, accenti e controlli restano nel viewport.
 
-**Identità e coerenza visuale:** i nomi ora hanno gerarchia traccia/lane e un
-fondale compatto, misurato sul testo, non un gradiente a tutta altezza. La build
-nativa richiede per default i sorgenti visuali originali di Multiverse in
-`AYRA_SOURCE_DIR`. Lo snapshot locale è un opt-out esplicito e viene dichiarato
-nella UI: non è il LookAndFeel completo di Multiverse.
+**Identità flottante:** la lente segue l'HTML approvato in
+`fixtures/frosted-lens.html`: Performer e tipo/pallino sopra, traccia sotto.
+La card resta centrata verticalmente anche durante il resize. Il Performer è a
+sinistra; tipo e nome traccia sono allineati a destra. Il bordo sinistro del
+fondale (blur e riflesso compresi) scompare prima degli angoli.
+È compatta, non editabile e lascia passare tutti i gesti alle clip. Si nasconde
+soltanto quando il puntatore incontra una clip sotto la lente, poi riappare
+all'uscita dalla sua area. Nessuna fascia header e nessuna rinomina dai nomi.
 
-La verifica corrente è descritta in
-[verification/identity/STATUS.md](verification/identity/STATUS.md): build native
-del painter e del pannello/input nei profili originale e snapshot, più test core.
-La build completa dell'app a 19 lane e i sette target del report
-[no-header precedente](verification/no-header/STATUS.md) appartengono al checkpoint
-`278060c`; non vengono attribuiti automaticamente alla nuova revisione grafica.
+La build nativa richiede per default i sorgenti visuali originali di Multiverse
+in `AYRA_SOURCE_DIR`. Lo snapshot locale è un opt-out dichiarato nella UI.
+Vedere [contratto della lente](docs/FROSTED_LENS.md) e
+[verifica corrente](verification/lane-polish/STATUS.md).
 
 ### Utilizzo
 
@@ -28,10 +29,16 @@ processore Tensor. I pulsanti `<` e `>` navigano la lane, compresi gli eventi lo
 di Marker/Metrica/Counter e i punti delle linee continue.
 
 Il menu **Visibilità** nasconde singoli controlli, meter e indicatore di resize.
-Nome/gradiente e accento non possono sparire: nome sinistra/destra, accento
-sinistra/destra/entrambi. Click e drag sotto il nome vanno al canvas; doppio click
-sul titolo rinomina la traccia condivisa; sul sottotitolo rinomina solo la lane. Il bordo inferiore ridimensiona soltanto
+Nome/gradiente e accento non si possono disattivare dal menu: nome sinistra/destra,
+accento sinistra/destra/entrambi. La lente ha la sola scomparsa temporanea
+clip-aware descritta sopra. Anche il doppio click raggiunge il canvas: nessun
+editor del nome viene aperto. Il bordo inferiore ridimensiona soltanto
 le lane manuali. Marker, Metrica e Counter restano compatti.
+Ogni lato ha un unico well recessed per tutti i suoi pulsanti. Le frecce sono
+i chevron singoli `<`/`>`, non icone di trasporto. Gli accenti laterali usano
+soltanto il colore della traccia: il colore tipo resta nel pallino della card.
+L’altezza rispetta sempre i controlli visibili: 56 px per due righe di bottoni,
+32 px per la sola navigazione, senza imporre quel minimo alle lane prive di bottoni.
 
 I meter sono **sintetici, opzionali e spenti al primo avvio**, anche sulle lane
 non audio; il loro painter è quello Ayra già presente nel Lab. I colori di tipo
@@ -41,7 +48,7 @@ usano colori neutri del tema. La demo non riproduce audio.
 ### Build
 
 Servono un checkout ufficiale JUCE 8, `ayra_curves`, `ayra_timeline` a
-`caa00902884214bf808befae294efe59c1b088fa` o revisione compatibile, e il submodule
+`ddf196e94de744f189b61b75277c2f9df3b8598f` o revisione compatibile, e il submodule
 Melatonin già dichiarato dalla repository. Nessun provider privato è copiato qui.
 
 ```sh

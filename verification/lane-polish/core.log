@@ -1,0 +1,23 @@
+-- Ayra visual source: ayra_ui snapshot (not live Multiverse)
+-- Configuring done (4.8s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/lane-polish/build-core
+[ 33%] Built target ayra_lab_core
+[ 55%] Built target ayra_timeline_panel_tests
+[100%] Built target ayra_panel_fixture_tests
+[100%] Built target ayra_lab_tests
+Internal ctest changing into directory: /mnt/data/lane-polish/build-core
+Test project /mnt/data/lane-polish/build-core
+    Start 1: core_regressions
+1/4 Test #1: core_regressions .................   Passed    0.01 sec
+    Start 2: timeline_panel_contracts
+2/4 Test #2: timeline_panel_contracts .........   Passed    0.10 sec
+    Start 3: timeline_fixture_transactions
+3/4 Test #3: timeline_fixture_transactions ....   Passed    0.09 sec
+    Start 4: fixture_sources
+4/4 Test #4: fixture_sources ..................   Passed    0.85 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =   1.04 sec
+PASS provider, ownership, no-header and existing-artwork source boundaries
