@@ -57,7 +57,7 @@ jobs:
               assert not destination.is_symlink()
               destination.write_bytes(''.join(data).encode('utf-8'))
               destination.chmod(int(item['m'], 8) & 0o777)
-              git('add', '--', str(path))
+              git('add', '-f', '--', str(path))
           actual = git('write-tree').decode().strip()
           assert actual == TREE, 'Tree differs from tested workspace: ' + actual
           git('config', 'user.name', 'Ayra Soft')
