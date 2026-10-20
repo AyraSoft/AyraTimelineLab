@@ -19,6 +19,12 @@ class ContinuousLineCanvas final : public juce::Component,
 {
 public:
   CanvasViewportBinding panelView;
+    bool containsPanelEditableAt(juce::Point<float> p)const
+    {
+        TimelineClipZone zone=TimelineClipZone::none;int point=-1,segment=-1;
+        hitTestLine(p,zone,point,segment);
+        return zone!=TimelineClipZone::none&&zone!=TimelineClipZone::laneBackground;
+    }
 
     std::shared_ptr<void> capturePanelState()const
     {return std::make_shared<std::vector<MidiEnvelopePoint>>(points);}
@@ -561,7 +567,7 @@ private:
     {
         if (e.mods.isPopupMenu() || getWidth() <= 0 || height <= 0) return;
 
-        if (e.position.y >= getHeight() - 6.0f || e.position.y <= 24.0f)
+        if (!panelView.enabled && (e.position.y >= getHeight() - 6.0f || e.position.y <= 24.0f))
         {
             const int modelHeight = clip_height_law::nextModelHeight (static_cast<float> (height), host.getVerticalZoom());
             host.store().resize (data.id, modelHeight);

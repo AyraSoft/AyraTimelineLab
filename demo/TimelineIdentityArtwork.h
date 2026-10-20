@@ -4,6 +4,7 @@
     Optional real backdrop blur uses the existing Melatonin provider, not a
     fabricated frosted texture. No global cache or continuous animation. */
 #pragma once
+#include "TimelineStatusArtwork.h"
 #include "../modules/ayra_timeline_panel/TimelineIdentity.h"
 
 namespace ayra::lab
@@ -118,6 +119,10 @@ public:
               dark ? juce::Colour(0xfff1f5f9) : juce::Colour(0xff182033),true);
         label(content.type, layout.type, layout.typeFont,
               dark ? juce::Colour(0xff94a3b8) : juce::Colour(0xff58677c),true);
+        label("M",layout.mute,layout.trackFont,ayra::tokens::muteIndicator(),true);
+        label("S",layout.solo,layout.trackFont,ayra::tokens::soloIndicator(),true);
+        for(std::size_t i=0;i<layout.indicators.size();++i)
+            TimelineStatusArtwork::draw(g,static_cast<timeline_panel::TrackIndicator>(i),layout.indicators[i]);
         if (!layout.typeMark.isEmpty())
         {
             const auto dot = layout.typeMark.toFloat();

@@ -173,7 +173,7 @@ void noHeaderPolicies()
 {
     auto s=fixture();s.lanes.back().heightPolicy=HeightPolicy::compact;
     s.lanes.back().minimumHeight=16;s.lanes.back().initialHeight=24;
-    Controller c;CHECK(c.adopt(s));CHECK(c.setMode(Mode::freeLanes));
+    Controller c;CHECK(c.adopt(s));CHECK(c.setMode(Mode::freeLanes));CHECK(c.setChrome(ayra::timeline::TimelineChromeVisibility{}));
     double sum=0;for(const auto& lane:s.lanes)sum+=c.height(lane.id);
     CHECK(c.totalHeight()==sum);CHECK(Controller::seamHeight==0);
     CHECK(c.height("tempo")==32);CHECK(!c.beginResize("tempo"));CHECK(!c.setHeight("tempo",200));
@@ -197,7 +197,7 @@ void noHeaderPolicies()
 void chromeHeightFloor()
 {
     auto s=fixture();s.lanes[0].minimumHeight=16;s.lanes[0].initialHeight=24;s.lanes[0].maximumHeight=40;
-    Controller c;CHECK(c.adopt(s));CHECK(c.setMode(Mode::freeLanes));
+    Controller c;CHECK(c.adopt(s));CHECK(c.setMode(Mode::freeLanes));CHECK(c.setChrome(ayra::timeline::TimelineChromeVisibility{}));
     CHECK(c.height("a.audio")==56);CHECK(c.snapshot().lanes[0].initialHeight==24);
     CHECK(c.beginResize("a.audio"));CHECK(c.updateResize(-10000));CHECK(c.height("a.audio")==56);
     CHECK(!c.endResize(true)); // clamped no-op
@@ -217,6 +217,19 @@ void chromeHeightFloor()
 }
 int main()
 {
+    { Controller c;CHECK(c.adopt(fixture()));
+      const auto initial=c.view();const auto& v=initial.chrome;
+      CHECK(!v.navigation&&!v.mute&&!v.solo&&!v.open&&!v.monitoring);
+      CHECK(!v.inputMeters&&!v.outputMeters&&!v.resizeIndicator);
+      CHECK(initial.identityNavigation);
+      CHECK(c.setIdentityNavigation(false));CHECK(!c.view().identityNavigation);
+      CHECK(c.undoView());CHECK(c.view().identityNavigation);CHECK(c.redoView());
+      CHECK(!c.view().identityNavigation);
+      auto snap=c.snapshot();snap.owners[0].status={true,true,true,true,true,true,true};
+      ++snap.revision;CHECK(c.adopt(snap));
+      const auto active=activeTrackIndicators(c.snapshot().owners[0].status);
+      CHECK(std::count(active.begin(),active.end(),true)==7);
+    }
     noHeaderPolicies();chromeHeightFloor();
     validation(); layout(); resizeAndViewport(); commands(); largeHierarchy();
     std::cout << "PASS " << checks << " checks (presentation only; no native GUI claim)\n";

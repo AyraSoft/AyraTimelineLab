@@ -1,4 +1,5 @@
 #pragma once
+#include "TimelineTrackStatus.h"
 // Portable, message-thread presentation contracts. No JUCE, DSP, media or document writes.
 // Owner IDs, lane IDs and clip IDs are opaque canonical identities, never display indices.
 #include <ayra_timeline/ayra_timeline_presentation.h>
@@ -40,6 +41,7 @@ struct Owner
     bool muted = false, soloed = false;
     Monitoring monitoring = Monitoring::automatic;
     Capabilities capabilities{};
+    TrackStatus status{}; // shared, host-resolved readout for every lane of this owner
     bool operator==(const Owner&) const = default;
 };
 struct Lane
@@ -177,8 +179,16 @@ struct ViewState
     std::set<Id> collapsedOwners, selectedLanes, hiddenLanes;
     std::map<Id, int> heights;
     std::vector<LayoutGroup> layoutGroups;
-    ayra::timeline::TimelineChromeVisibility chrome;
+    // Keep the provider API and all side controls. This panel's compact profile
+    // opts out by default; callers may explicitly enable any of them again.
+    ayra::timeline::TimelineChromeVisibility chrome = [] {
+        ayra::timeline::TimelineChromeVisibility c;
+        c.navigation=c.mute=c.solo=c.monitoring=c.open=false;
+        c.inputMeters=c.outputMeters=c.resizeIndicator=false;
+        return c;
+    }();
     Id activeLane, rangeAnchor;
+    bool identityNavigation=true; // appended: existing aggregate fields retain their order
     bool operator==(const ViewState&) const = default;
 };
 struct Row
@@ -246,6 +256,11 @@ public:
     {
         if (resize) return false;
         auto next=state;next.chrome=chrome;return change(std::move(next));
+    }
+    bool setIdentityNavigation(bool enabled)
+    {
+        if(resize)return false;
+        auto next=state;next.identityNavigation=enabled;return change(std::move(next));
     }
     bool setLaneVisible(const Id& id,bool visible)
     {

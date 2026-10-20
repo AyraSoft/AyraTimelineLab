@@ -63,7 +63,7 @@ private:
         void paintButton(juce::Graphics& g,bool over,bool down)override
         {
             feedback(g,*this,over,down);
-            const auto colour=getToggleState()?(isMute?ayra::tokens::streamMidi():ayra::tokens::accent()):ayra::tokens::textPrimary();
+            const auto colour=getToggleState()?(isMute?ayra::tokens::muteIndicator():ayra::tokens::soloIndicator()):ayra::tokens::textPrimary();
             g.setColour(colour.withMultipliedAlpha(isEnabled()?1.0f:0.30f));
             g.setFont(ayra::tokens::type::body().withHeight(12.0f).boldened());
             g.drawText(getName(),getLocalBounds(),juce::Justification::centred);

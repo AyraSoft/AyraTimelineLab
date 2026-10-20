@@ -79,6 +79,15 @@ inline Session makePanelFixture()
         {"mix-b","p-b","Noah MIX",0xffbb86c7,R::convergence},
         {"song-main","song","Song Main",0xffd4ae48,R::songMain,false,false,M::automatic,{true,false,true,true}}
     };
+    // Explicit synthetic readbacks demonstrate the passive state indicators.
+    // They do not imply that the sandbox owns a runtime/monitoring engine.
+    m->owners[2].muted=true; // Backing: yellow M
+    m->owners[4].status.canvasActive=true;
+    m->owners[4].status.monitoringActive=true; // Auto policy may actually be live
+    m->owners[5].soloed=true; // Keys: red S
+    m->owners[5].status.bufferized=true;m->owners[5].status.oversampled=true;
+    m->owners[5].status.latencyCompensated=true;
+    m->owners[8].status.shutdown=true;m->owners[8].status.bypassed=true;
     using S=panel::Stream; using V=panel::VisualKind;
     m->lanes={
         {"range","globals",{},"Range",S::global,V::span,28,24,1200,true},
