@@ -324,7 +324,7 @@ private:
             void mouseDown(const juce::MouseEvent& e) override { changed(e,true); }
             void mouseDrag(const juce::MouseEvent& e) override { changed(e,true); }
             void mouseUp(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
-            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
+            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.handleCanvasDoubleClick(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
             void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails&) override { changed(e); }
         private:
             LaneRow& owner;
@@ -518,7 +518,8 @@ private:
             }
         }
         void mouseMove(const juce::MouseEvent& e)override
-        {setMouseCursor(geometry.resizeHit.contains(e.x,e.y)?juce::MouseCursor::UpDownResizeCursor:juce::MouseCursor::NormalCursor);}
+        {setMouseCursor(geometry.isAccent(e.x,e.y)?juce::MouseCursor::DraggingHandCursor:
+            geometry.resizeHit.contains(e.x,e.y)?juce::MouseCursor::UpDownResizeCursor:juce::MouseCursor::NormalCursor);}
         void mouseDrag(const juce::MouseEvent& e)override
         {
             if(resizing){host.controller.updateResize(e.getScreenY()-resizeStart);host.refresh();return;}
@@ -536,8 +537,26 @@ private:
                 dragging=false;host.dropLane.clear();host.refresh();if(host.onSelectionChanged)host.onSelectionChanged();
             }
         }
+        void toggleCompactHeight()
+        {
+            const auto* lane=host.controller.lane(row.lane);
+            if(!lane||lane->heightPolicy!=HeightPolicy::manual)return;
+            const int minimum=host.controller.minimumHeight(*lane);
+            const int expanded=juce::jmax(lane->initialHeight,minimum+24);
+            host.controller.setHeight(row.lane,host.controller.height(row.lane)<=minimum+2?expanded:minimum);
+            host.refresh();
+        }
+        void handleCanvasDoubleClick(const juce::MouseEvent& e)
+        {
+            if(!e.mods.isLeftButtonDown()||!canvas.component||e.eventComponent!=canvas.component.get())return;
+            const auto local=e.getEventRelativeTo(canvas.component.get()).position;
+            // A real editable hit owns its gesture (points, trims, fades, etc.).
+            if(canvas.containsEditableAt&&canvas.containsEditableAt(local))return;
+            if(canvas.containsClipAt&&!canvas.containsClipAt(local))return;
+            toggleCompactHeight();
+        }
         void mouseDoubleClick(const juce::MouseEvent& e)override
-        {if(geometry.resizeHit.contains(e.x,e.y)){if(const auto* lane=host.controller.lane(row.lane);lane&&lane->visual!=VisualKind::continuous)host.controller.setHeight(row.lane,lane->initialHeight);host.refresh();}}
+        {if(geometry.isAccent(e.x,e.y)||geometry.resizeHit.contains(e.x,e.y))toggleCompactHeight();}
         bool keyPressed(const juce::KeyPress& key)override
         {if(key==juce::KeyPress::escapeKey&&resizing){resizing=false;host.controller.endResize(false);host.refresh();return true;}return false;}
     private:
@@ -668,6 +687,11 @@ private:
                 if(expand)titleHoverOrigin=identityLayout.titleHit;else titleHoverOrigin={};
                 titleExpanded=expand;rebuildIdentityGeometry();
                 inside=withinView&&identityLayout.backdrop.toFloat().contains(p);
+            }
+            // Passive service-lane titles must not linger under the pointer.
+            if(inside&&!canRenameTitle()&&identityLayout.titleHit.toFloat().contains(p)){
+                identityHover.update(true,true,false,juce::Time::getMillisecondCounterHiRes(),true);
+                identitySurface.setVisible(false);host.scheduleIdentity(row.key,{});return;
             }
             const bool protectedTarget=onNavigation||onTitle;
             bool editable=false;
