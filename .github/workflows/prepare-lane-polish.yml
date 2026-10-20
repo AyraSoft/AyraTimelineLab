@@ -1,0 +1,70 @@
+name: Prepare verified lane polish source
+on:
+  push:
+    branches: ['work/lane-polish-transfer-20261020']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct exact locally tested tree on a ready branch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          BASE = '0a1f9304722db721b2575b8ca1808b1f3d000b47'
+          TREE = '681296b66c9a6475d0980ed49e300e860f01fdd6'
+          DIGEST = '0e273dd2c7a3af18bc0d25bb5468eb123f158b1b2e9ec336e1a70618b44d3c34'
+          READY = 'work/lane-polish-ready-20261020'
+          def git(*args, **kwargs):
+              return subprocess.check_output(['git', *args], **kwargs)
+          encoded = ''.join(pathlib.Path(f'.publication/lane-polish-{i}.b64').read_text() for i in range(6))
+          raw = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert len(raw) == 99677 and hashlib.sha256(raw).hexdigest() == DIGEST
+          manifest = json.loads(raw)
+          assert manifest['base'] == BASE and len(manifest['files']) == 41
+          assert git('ls-remote', 'origin', 'refs/heads/main').decode().split()[0] == BASE, 'Main changed; inspect instead of overwriting'
+          git('checkout', '--detach', BASE)
+          seen = set()
+          for item in manifest['files']:
+              path = pathlib.PurePosixPath(item['p'])
+              assert not path.is_absolute() and '..' not in path.parts and path.parts[0] not in ('.git', '.github', '.publication')
+              assert str(path) not in seen and item['m'] in ('100644', '100755')
+              seen.add(str(path))
+              previous = subprocess.run(['git', 'show', BASE + ':' + str(path)], capture_output=True)
+              old = previous.stdout if previous.returncode == 0 else b''
+              if item['b'] is None:
+                  assert previous.returncode != 0, 'Unexpected existing file'
+              else:
+                  assert previous.returncode == 0
+                  assert hashlib.sha1(b'blob ' + str(len(old)).encode() + b'\0' + old).hexdigest() == item['b'], 'Base blob mismatch: ' + str(path)
+              lines = old.decode('utf-8').splitlines(keepends=True)
+              previous_start = len(lines) + 1
+              for start, end, replacement in reversed(item['e']):
+                  assert 0 <= start <= end <= len(lines) and end < previous_start
+                  previous_start = start
+                  lines[start:end] = replacement.splitlines(keepends=True)
+              destination = pathlib.Path(path)
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              assert not destination.is_symlink()
+              destination.write_bytes(''.join(lines).encode('utf-8'))
+              destination.chmod(int(item['m'], 8) & 0o777)
+              git('add', '-f', '--', str(path))
+          actual = git('write-tree').decode().strip()
+          assert actual == TREE, 'Different from tested tree: ' + actual
+          subprocess.run(['python3', 'tools/check_panel_boundary.py'], check=True)
+          subprocess.run(['python3', 'tools/generate.py', '--check'], check=True)
+          subprocess.run(['python3', 'tests/identity/test_visual_adapter.py'], check=True)
+          git('config', 'user.name', 'Ayra Soft')
+          git('config', 'user.email', '131635008+AyraSoft@users.noreply.github.com')
+          commit = git('commit-tree', actual, '-p', BASE, '-m', 'Prepare tested centred lens and grouped lane-control source').decode().strip()
+          git('push', 'origin', commit + ':refs/heads/' + READY)
+          print('VERIFIED_TREE=' + actual)
+          print('READY_COMMIT=' + commit)
+          print('Only ready branch updated; main publication uses a separate guarded connector action.')
+          PY
