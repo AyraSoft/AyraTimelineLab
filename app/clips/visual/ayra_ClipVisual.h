@@ -1,5 +1,6 @@
 #pragma once
 #include "../keyframe/ayra_KeyframeRowLayout.h"
+#include "../../../modules/ayra_timeline_panel/TimelineHeightPresets.h"
 
 namespace ayra::lab::clips
 {
@@ -584,44 +585,33 @@ enum class ClipFeatureId : std::uint16_t
 
 namespace clip_height_law
 {
-    /** Altezze canoniche condivise da tutte le clip (Single Source of Truth).
-        Rappresentano la legge comune di dimensionamento verticale e Level of Detail (LOD):
-        - compact:  96 px (preview / compatta)
-        - medium:  256 px (editing principale / in-place)
-        - full:    400 px (editing esteso / automazione / velocity) */
-    static constexpr int compactTrackHeight = 96;
-    static constexpr int mediumTrackHeight  = 256;
-    static constexpr int fullTrackHeight    = 400;
+    // Preview levels match an individual 24px event row. The fixture's old
+    // three-step cycle must not keep running for Audio/Image/Automation.
+    static constexpr int compactTrackHeight = ayra::timeline_panel::height_presets::compact;
+    static constexpr int mediumTrackHeight = ayra::timeline_panel::height_presets::midiEditor;
+    static constexpr int fullTrackHeight = ayra::timeline_panel::height_presets::expanded;
 
-    [[nodiscard]] inline int nextCanonicalHeight (const float currentVisualHeight) noexcept
+    [[nodiscard]] inline int nextCanonicalHeight(float h, bool midi=false) noexcept
+    {return ayra::timeline_panel::height_presets::next(h,midi);}
+    [[nodiscard]] inline int nextModelHeight(float current, float zoom, bool midi=false) noexcept
+    {return juce::roundToInt(static_cast<float>(nextCanonicalHeight(current,midi)) /
+                             std::max(0.01f, zoom));}
+    /** Only unclaimed surfaces may cycle the height; specialist double clicks
+        (point insertion/reset, warp, notes, stretch, crossfade) win. */
+    [[nodiscard]] constexpr bool isUnclaimedDoubleClickZone(TimelineClipZone z,int marker=-1) noexcept
     {
-        if (currentVisualHeight < 150.0f) return mediumTrackHeight;
-        if (currentVisualHeight < 320.0f) return fullTrackHeight;
-        return compactTrackHeight;
+        return z==TimelineClipZone::none || z==TimelineClipZone::clipBody
+            || z==TimelineClipZone::clipTitleMove || z==TimelineClipZone::midiNoteBody
+            || (z==TimelineClipZone::topWarpRail && marker<0);
+    }
+    [[nodiscard]] inline bool isHeaderAreaOrClosedClip(TimelineClipZone z,
+                                                        float height,int marker=-1) noexcept
+    {
+        // Compatibility API: no longer preempts semantic double clicks.
+        (void)height;
+        return isUnclaimedDoubleClickZone(z,marker);
     }
 
-    [[nodiscard]] inline int nextModelHeight (const float currentVisualHeight, const float verticalZoom) noexcept
-    {
-        const float vZoom = std::max (0.01f, verticalZoom);
-        return juce::roundToInt (static_cast<float> (nextCanonicalHeight (currentVisualHeight)) / vZoom);
-    }
-
-    /** Verifica se l'interazione del mouse avviene nell'header della clip o se la clip
-        e' talmente compressa verticalmente (< 48px) che l'intera superficie risponde al
-        doppio click di riapertura/espansione (eccetto bracket laterali estremi). */
-    [[nodiscard]] inline bool isHeaderAreaOrClosedClip (
-        const TimelineClipZone zone,
-        const float clipVisualHeight,
-        const int markerIdx = -1) noexcept
-    {
-        if (zone == TimelineClipZone::clipTitleMove) return true;
-        if (zone == TimelineClipZone::topWarpRail && markerIdx < 0) return true;
-        if (clipVisualHeight < 48.0f)
-        {
-            return ! isClipEdgeZone (zone);
-        }
-        return false;
-    }
 }
 
 /** Slot geometrico in cui risiede la decorazione rispetto al corpo della clip. */

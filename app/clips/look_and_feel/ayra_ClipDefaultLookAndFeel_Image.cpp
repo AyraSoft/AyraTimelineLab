@@ -471,6 +471,22 @@ void ClipDefaultLookAndFeel::drawImageClip (
             g.strokePath (envLine, juce::PathStrokeType (4.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             g.setColour (juce::Colours::white.withAlpha (0.95f));
             g.strokePath (envLine, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            // Fade boundary arcs are deliberately NOT editable by point insertion.
+            // Distinguish only these end segments; the middle opacity curve
+            // retains its existing painter and interaction geometry.
+            const auto drawConstrainedFade = [&](const BoundedCurvePixelSegment& segment)
+            {
+                juce::Path line;line.startNewSubPath(segment.start);
+                appendBoundedCurvePixelSegment(line,segment);
+                constexpr float dashes[] { 3.0f, 2.5f };
+                juce::Path visible;
+                juce::PathStrokeType(1.5f).createDashedStroke(visible,line,dashes,2);
+                g.setColour(tk::textSecondary().withAlpha(0.95f));
+                g.fillPath(visible);
+            };
+            if (hasFadeIn) drawConstrainedFade(boundaryGeometry.fadeIn);
+            if (hasFadeOut) drawConstrainedFade(boundaryGeometry.fadeOut);
+
 
             // D) Handle di curvatura (pallini vuoti Multiverse)
             for (const auto& sc : segCps)

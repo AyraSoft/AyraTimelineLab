@@ -518,7 +518,11 @@ private:
             }
         }
         void mouseMove(const juce::MouseEvent& e)override
-        {setMouseCursor(geometry.resizeHit.contains(e.x,e.y)?juce::MouseCursor::UpDownResizeCursor:juce::MouseCursor::NormalCursor);}
+        {
+            if(geometry.isAccent(e.x,e.y))setMouseCursor(juce::MouseCursor::DraggingHandCursor);
+            else setMouseCursor(geometry.resizeHit.contains(e.x,e.y)
+                ? juce::MouseCursor::UpDownResizeCursor:juce::MouseCursor::NormalCursor);
+        }
         void mouseDrag(const juce::MouseEvent& e)override
         {
             if(resizing){host.controller.updateResize(e.getScreenY()-resizeStart);host.refresh();return;}
@@ -537,7 +541,19 @@ private:
             }
         }
         void mouseDoubleClick(const juce::MouseEvent& e)override
-        {if(geometry.resizeHit.contains(e.x,e.y)){if(const auto* lane=host.controller.lane(row.lane);lane&&lane->visual!=VisualKind::continuous)host.controller.setHeight(row.lane,lane->initialHeight);host.refresh();}}
+        {
+            if(!e.mods.isLeftButtonDown())return;
+            // Accent owns vertical preview cycling, including continuous lines.
+            // Other double clicks remain with the real canvas/editor target.
+            if(geometry.isAccent(e.x,e.y)){
+                accentDown=false;dragging=false;deferredSelection=false;host.dropLane.clear();
+                if(host.controller.cycleHeight(row.lane))host.refresh();
+                return;
+            }
+            if(geometry.resizeHit.contains(e.x,e.y)){
+                if(host.controller.cycleHeight(row.lane))host.refresh();
+            }
+        }
         bool keyPressed(const juce::KeyPress& key)override
         {if(key==juce::KeyPress::escapeKey&&resizing){resizing=false;host.controller.endResize(false);host.refresh();return true;}return false;}
     private:
@@ -679,7 +695,9 @@ private:
                     else if(canvas.containsClipAt)editable=canvas.containsClipAt(local);
                 }
             }
-            if(identityHover.update(inside,editable,protectedTarget,juce::Time::getMillisecondCounterHiRes(),editing)) {
+            if(identityHover.update(inside,editable,protectedTarget,
+                                    juce::Time::getMillisecondCounterHiRes(),
+                                    editing || (inside && editable && !canRenameTitle()))) {
                 underlayDirty=true;repaint(identityLayout.backdrop);
             }
             identitySurface.setVisible(!identityHover.hidden());

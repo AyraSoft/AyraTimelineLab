@@ -2417,23 +2417,10 @@ private:
 
     const auto hit = hitTestZones(e.position);
 
-    // 0. Doppio click sul titolo o header della clip (o intera clip se
-    // compressa):
-    //    cicla le 3 altezze canoniche condivise (96 -> 256 -> 400 -> 96)
-    //    tenendo conto dello zoom verticale
-    if (hit.clip != nullptr &&
-        clip_height_law::isHeaderAreaOrClosedClip(
-            hit.zone, hit.bounds.getHeight(), hit.markerIdx)) {
-      const int modelHeight = clip_height_law::nextModelHeight(
-          static_cast<float>(height), host.getVerticalZoom());
-      resetDragState();
-      host.store().resize(data.id, modelHeight);
-      return;
-    }
 
     if (!panelView.enabled && e.position.y >= getHeight() - 6.0f) {
       const int modelHeight = clip_height_law::nextModelHeight(
-          static_cast<float>(height), host.getVerticalZoom());
+          static_cast<float>(height), host.getVerticalZoom(), true);
       host.store().resize(data.id, modelHeight);
       return;
     }
@@ -2537,6 +2524,15 @@ private:
       repaint();
       return;
     }
+    // Surface without a separate double-click action: cycle ONLY the lane's
+    // presentation height. Other semantic targets retain their own handlers.
+    if (hit.clip && clip_height_law::isUnclaimedDoubleClickZone(hit.zone,hit.markerIdx)) {
+      if (panelView.enabled && panelView.cycleHeight) panelView.cycleHeight();
+      else host.store().resize(data.id, clip_height_law::nextModelHeight(
+          static_cast<float>(height), host.getVerticalZoom(), true));
+      return;
+    }
+
   }
 
 private:

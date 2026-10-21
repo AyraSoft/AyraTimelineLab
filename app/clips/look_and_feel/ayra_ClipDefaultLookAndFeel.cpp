@@ -147,6 +147,22 @@ void ClipDefaultLookAndFeel::drawAutomationCurve (
 
     // 4. Linea TimelineLab: alone scuro + tratto crisp.
     timelineLaf.drawTimelineAutomationCurveStroke (g, envLine, p.curveColour);
+    // Endpoint fade segments are constrained boundary geometry, NOT point-
+    // insertion segments. Short neutral dashes make that visible immediately;
+    // the editable internal body remains drawn by the canonical Ayra stroke.
+    const auto drawConstrainedFade = [&](const BoundedCurvePixelSegment& seg)
+    {
+        juce::Path src;src.startNewSubPath(seg.start);appendBoundedCurvePixelSegment(src,seg);
+        constexpr float dashes[] { 3.0f, 2.5f };
+        juce::Path overlay;
+        juce::PathStrokeType(1.6f,juce::PathStrokeType::curved,
+                             juce::PathStrokeType::rounded).createDashedStroke(overlay,src,dashes,2);
+        g.setColour(p.curveColour.interpolatedWith(tk::textSecondary(),0.55f).withAlpha(0.90f));
+        g.fillPath(overlay);
+    };
+    if (boundaryGeometry.hasFadeIn)drawConstrainedFade(boundaryGeometry.fadeIn);
+    if (boundaryGeometry.hasFadeOut)drawConstrainedFade(boundaryGeometry.fadeOut);
+
 
     // 5. Handle di curvatura TimelineLab per ogni segmento intermedio.
     auto drawCurveHollowHandle = [&] (juce::Point<float> centre, bool active)
