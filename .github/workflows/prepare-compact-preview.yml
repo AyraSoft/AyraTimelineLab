@@ -1,0 +1,75 @@
+name: Prepare compact vertical preview source
+on:
+  push:
+    branches: ["work/compact-lane-zoom-transfer-20261021"]
+permissions:
+  contents: write
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct audited source files on ready branch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          BASE = '98b7d53e021f0de0f0ec4ba132cd6697f2a7a7db'
+          DIGEST = '58b5dedb8f54610120f26059d4ab5fe3c87cc71827304d62451797c5d55add95'
+          READY = 'work/compact-lane-zoom-ready-20261021'
+          def git(*args):
+              return subprocess.check_output(['git', *args])
+          def blob(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+          encoded = ''.join(pathlib.Path(f'.publication/compact-{i}.b64').read_text() for i in range(4))
+          raw = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(raw).hexdigest() == DIGEST
+          manifest = json.loads(raw)
+          assert manifest['base'] == BASE and len(manifest['files']) == 20
+          assert git('ls-remote', 'origin', 'refs/heads/main').decode().split()[0] == BASE, 'Main moved'
+          git('checkout', '--detach', BASE)
+          seen = set()
+          for item in manifest['files']:
+              path = pathlib.PurePosixPath(item['p'])
+              assert not path.is_absolute() and '..' not in path.parts
+              assert path.parts[0] not in ('.git', '.github', '.publication')
+              assert str(path) not in seen
+              seen.add(str(path))
+              previous = subprocess.run(['git', 'show', BASE + ':' + str(path)], capture_output=True)
+              old = previous.stdout if previous.returncode == 0 else b''
+              if item['b'] is None:
+                  assert previous.returncode != 0, str(path)
+              else:
+                  assert previous.returncode == 0 and blob(old) == item['b'], str(path)
+              data = old.decode('utf-8').splitlines(keepends=True)
+              prev = len(data) + 1
+              for start, end, replacement in reversed(item['e']):
+                  assert 0 <= start <= end <= len(data) and end <= prev
+                  prev = start
+                  data[start:end] = replacement.splitlines(keepends=True)
+              result = ''.join(data).encode('utf-8')
+              assert blob(result) == item['n'], 'Modified blob mismatch ' + str(path)
+              destination = pathlib.Path(path)
+              assert all(not p.is_symlink() for p in destination.parents)
+              assert not destination.is_symlink()
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              destination.write_bytes(result)
+              git('add', '-f', '--', str(path))
+          assert set(git('diff', '--cached', '--name-only').decode().splitlines()) == seen
+          subprocess.run(['c++', '-std=c++20', '-Wall', '-Wextra', '-Wpedantic', '-Werror',
+                          'tests/HeightPresetTests.cpp', '-o', '/tmp/height_presets'], check=True)
+          subprocess.run(['/tmp/height_presets'], check=True)
+          subprocess.run(['python3', 'tools/check_panel_boundary.py'], check=True)
+          subprocess.run(['python3', 'tests/identity/test_visual_adapter.py'], check=True)
+          tree = git('write-tree').decode().strip()
+          git('config', 'user.name', 'Ayra Soft')
+          git('config', 'user.email', '131635008+AyraSoft@users.noreply.github.com')
+          commit = git('commit-tree', tree, '-p', BASE,
+                       '-m', 'Implement compact lane zoom and mirrored title materials').decode().strip()
+          git('push', 'origin', commit + ':refs/heads/' + READY)
+          print('VALIDATED_TREE=' + tree)
+          print('READY_COMMIT=' + commit)
+          PY
