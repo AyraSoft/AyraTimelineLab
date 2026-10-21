@@ -18,6 +18,7 @@
 
 #include "component/ayra_CutRailGroupGesture.h"
 #include "visual/ayra_ClipVisual.h"
+#include "midi/ayra_MidiPreviewPainter.h"
 #include "visual/ayra_ImageClipVisual.h"
 #include "component/ayra_ClipComponent.h"
 #include "audio/ayra_AudioClipComponent.h"

@@ -237,6 +237,59 @@ void curvePaintContracts()
     }
 }
 
+// Compare the actual MIDI painter with/without notes. A colourful background
+// cannot satisfy this test; every extreme-pitch note must contribute pixels.
+void midiPreviewPaintContracts()
+{
+    Harness<MidiClipCanvas> h("guitar.midi");
+    MidiClipComponent component("midi-overview-probe",h.canvas);
+    const std::array<MidiNoteVisual,4> notes{{
+        {0,.05f,.18f,0,1,1}, {1,.28f,.45f,42,40,1},
+        {2,.55f,.72f,84,100,1}, {3,.82f,.95f,127,127,1}}};
+    for(bool drum:{false,true}) for(int laneHeight:{32,48,64,96}) for(float scale:{1.0f,2.0f}) {
+        h.setHeight(laneHeight);auto v=h.visual();
+        v.bounds=v.bounds.withX(4).withWidth(160);
+        v.notes=notes.data();v.numNotes=int(notes.size());v.displayMinPitch=0;v.displayMaxPitch=127;
+        v.isDrumMode=drum;v.features.showWarpRail=false;v.features.showWarpControls=false;
+        v.title="A long clip name must not erase the compact notes";
+        v.overlap={};
+        const auto paint=[&](bool includeNotes){
+            juce::Image image(juce::Image::ARGB,int(170*scale),int((laneHeight+10)*scale),true);
+            juce::Graphics g(image);g.addTransform(juce::AffineTransform::scale(scale));
+            auto view=v;if(!includeNotes)view.numNotes=0;
+            ClipDefaultLookAndFeel::getDefaultInstance().drawMidiClip(g,view,component);
+            return image;
+        };
+        const auto withNotes=paint(true),empty=paint(false);
+        const auto piano=computeMidiClipLayout(v.bounds,v.zoomLod).pianoRollBounds;
+        if(laneHeight==32)CHECK(piano.getHeight()==18);
+        for(const auto& note:notes){
+            const auto geom=computeMidiNoteGeometry(note,v.bounds,0,127,drum,v.zoomLod);
+            CHECK(!geom.bounds.isEmpty());CHECK(piano.contains(geom.bounds));
+            const auto pixels=(geom.bounds*scale).getSmallestIntegerContainer();
+            int changed=0;
+            for(int y=pixels.getY();y<pixels.getBottom();++y)
+                for(int x=pixels.getX();x<pixels.getRight();++x)
+                    changed+=withNotes.getPixelAt(x,y)!=empty.getPixelAt(x,y);
+            CHECK(changed>=2);
+        }
+        if(laneHeight==32&&scale==2){
+            const auto file=output.getChildFile(drum?"midi-compact-drums.png":"midi-compact-notes.png");
+            file.deleteFile();juce::FileOutputStream stream(file);CHECK(stream.openedOk());
+            CHECK(juce::PNGImageFormat{}.writeImageToStream(withNotes,stream));
+        }
+    }
+    // Preview remains read-only even though its notes are now actually visible.
+    h.setHeight(32);
+    const auto v=h.visual();
+    for(int i=0;i<v.numNotes;++i){
+        const auto geom=computeMidiNoteGeometry(v.notes[i],v.bounds,v.displayMinPitch,v.displayMaxPitch,v.isDrumMode,v.zoomLod);
+        if(geom.bounds.isEmpty())continue;
+        const auto zone=CanvasContractAccess::hit(h.canvas,geom.centre).zone;
+        CHECK(zone!=TimelineClipZone::midiNoteBody&&zone!=TimelineClipZone::midiNoteLeftEdge&&zone!=TimelineClipZone::midiNoteRightEdge);
+    }
+}
+
 void realDemoWiring()
 {
     TimelinePanelDemo demo;demo.setSize(1480,1050);demo.addToDesktop(juce::ComponentPeer::windowIsTemporary);demo.setVisible(true);pump();
@@ -298,7 +351,7 @@ int main(int argc,char** argv)
         canvasContracts<MidiClipCanvas>("guitar.midi","midi");
         canvasContracts<LineClipCanvas>("keys.automation","line");
         canvasContracts<ImageClipCanvas>("voice.image","image");
-        gestureArbitration();curvePaintContracts();realDemoWiring();
+        gestureArbitration();curvePaintContracts();midiPreviewPaintContracts();realDemoWiring();
         juce::MouseEvent::setDoubleClickTimeout(previousTimeout);
         ayra::shadowCache().clear();juce::ImageCache::releaseUnusedImages();
         std::cout<<"PASS "<<checks<<" real canvas geometry, input, grouping, source-anchor and rendering contracts\n";

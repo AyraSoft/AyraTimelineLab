@@ -712,6 +712,18 @@ void ClipDefaultLookAndFeel::drawMidiClip (
                 const float ny = noteRect.getY();
                 const float nh = noteRect.getHeight();
 
+                if (!isInPlaceLOD)
+                {
+                    // No dark outline or in-note velocity in the overview: those
+                    // would swallow a 1-2px note. Keep real timing/pitch visible.
+                    const auto colour = n.selected ? juce::Colours::white
+                        : clip_midi_law::colourForVelocity(n.velocity)
+                              .interpolatedWith(juce::Colours::white,0.38f);
+                    paintMidiPreviewNote(g,noteRect,noteGeometry.drumRadius,
+                        colour.withAlpha(n.muted ? 0.50f : 0.95f));
+                    continue;
+                }
+
                 const float velNorm = juce::jlimit (0.15f, 1.0f, static_cast<float> (n.velocity) / 127.0f);
                 const bool isNoteHov = (v.hoveredNoteIdx == n.sourceIndex &&
                                        (v.hoveredZone == TimelineClipZone::midiNoteBody ||
@@ -858,55 +870,59 @@ void ClipDefaultLookAndFeel::drawMidiClip (
         }
 
 
-        // 3. Header della Clip: Titolo + Badge Stretch / Transpose / Velocity
-        const auto titleFont = tk::type::body().boldened().withHeight (12.0f);
-        g.setFont (titleFont);
-        const float titleW = juce::GlyphArrangement::getStringWidth (titleFont, v.title);
-
-        juce::String headerBadgeStr;
-        if (v.isStretchActive || v.stretchDeltaTicks != 0)
-        {
-            headerBadgeStr = (v.stretchDeltaTicks > 0 ? "+" : "") + juce::String (v.stretchDeltaTicks) + " tk";
-        }
-        else if (v.transposeSemitones != 0)
-        {
-            headerBadgeStr = (v.transposeSemitones > 0 ? "+" : "") + juce::String (v.transposeSemitones) + " st";
-        }
-        else if (v.isDrumMode)
-        {
-            headerBadgeStr = "DRUM";
-        }
-
-        const bool showHeaderBadge = headerBadgeStr.isNotEmpty();
         const auto badgeFont = tk::type::caption().boldened().withHeight (9.5f);
-        const float badgeTextW = showHeaderBadge ? juce::GlyphArrangement::getStringWidth (badgeFont, headerBadgeStr) : 0.0f;
-        const float badgeW = showHeaderBadge ? (badgeTextW + 8.0f) : 0.0f;
-        const float spacing = 6.0f;
-        const float totalHeaderW = titleW + (showHeaderBadge ? (spacing + badgeW) : 0.0f);
-
-        const float startX = juce::jlimit (v.bounds.getX() + 6.0f,
-                                           v.bounds.getRight() - totalHeaderW - 6.0f,
-                                           v.bounds.getCentreX() - totalHeaderW * 0.5f);
-        const juce::Rectangle<float> titleRect (startX, v.bounds.getY() + 1.0f, titleW, kTitleAreaHeight - 2.0f);
-
-        g.setColour (juce::Colours::black.withAlpha (0.50f));
-        g.drawText (v.title, titleRect.translated (0.0f, 1.0f).toNearestInt(), juce::Justification::centredLeft, true);
-        g.setColour (juce::Colours::white);
-        g.drawText (v.title, titleRect.toNearestInt(), juce::Justification::centredLeft, true);
-
-        if (showHeaderBadge)
+        if (!midiLayout.headerBounds.isEmpty())
         {
-            const float badgeH = 12.0f;
-            const float badgeY = v.bounds.getY() + (kTitleAreaHeight - badgeH) * 0.5f;
-            const juce::Rectangle<float> badgeRect (startX + titleW + spacing, badgeY, badgeW, badgeH);
+            // 3. Header della Clip: Titolo + Badge Stretch / Transpose / Velocity
+            const auto titleFont = tk::type::body().boldened().withHeight (12.0f);
+            g.setFont (titleFont);
+            const float titleW = juce::GlyphArrangement::getStringWidth (titleFont, v.title);
 
-            g.setColour (juce::Colour (0xd0101820));
-            g.fillRoundedRectangle (badgeRect, 2.5f);
-            g.setColour (v.isStretchActive ? juce::Colours::white : juce::Colour (0xbbff9800));
-            g.drawRoundedRectangle (badgeRect, 2.5f, 0.8f);
-            g.setFont (badgeFont);
-            g.setColour (v.isStretchActive ? juce::Colours::white : juce::Colour (0xffffe0b2));
-            g.drawText (headerBadgeStr, badgeRect.toNearestInt(), juce::Justification::centred);
+            juce::String headerBadgeStr;
+            if (v.isStretchActive || v.stretchDeltaTicks != 0)
+            {
+                headerBadgeStr = (v.stretchDeltaTicks > 0 ? "+" : "") + juce::String (v.stretchDeltaTicks) + " tk";
+            }
+            else if (v.transposeSemitones != 0)
+            {
+                headerBadgeStr = (v.transposeSemitones > 0 ? "+" : "") + juce::String (v.transposeSemitones) + " st";
+            }
+            else if (v.isDrumMode)
+            {
+                headerBadgeStr = "DRUM";
+            }
+
+            const bool showHeaderBadge = headerBadgeStr.isNotEmpty();
+            const float badgeTextW = showHeaderBadge ? juce::GlyphArrangement::getStringWidth (badgeFont, headerBadgeStr) : 0.0f;
+            const float badgeW = showHeaderBadge ? (badgeTextW + 8.0f) : 0.0f;
+            const float spacing = 6.0f;
+            const float totalHeaderW = titleW + (showHeaderBadge ? (spacing + badgeW) : 0.0f);
+
+            const float left = v.bounds.getX()+6.0f;
+            const float startX = juce::jlimit (left, juce::jmax(left,
+                v.bounds.getRight()-totalHeaderW-6.0f),
+                v.bounds.getCentreX()-totalHeaderW*0.5f);
+            const juce::Rectangle<float> titleRect (startX, v.bounds.getY() + 1.0f, titleW, kTitleAreaHeight - 2.0f);
+
+            g.setColour (juce::Colours::black.withAlpha (0.50f));
+            g.drawText (v.title, titleRect.translated (0.0f, 1.0f).toNearestInt(), juce::Justification::centredLeft, true);
+            g.setColour (juce::Colours::white);
+            g.drawText (v.title, titleRect.toNearestInt(), juce::Justification::centredLeft, true);
+
+            if (showHeaderBadge)
+            {
+                const float badgeH = 12.0f;
+                const float badgeY = v.bounds.getY() + (kTitleAreaHeight - badgeH) * 0.5f;
+                const juce::Rectangle<float> badgeRect (startX + titleW + spacing, badgeY, badgeW, badgeH);
+
+                g.setColour (juce::Colour (0xd0101820));
+                g.fillRoundedRectangle (badgeRect, 2.5f);
+                g.setColour (v.isStretchActive ? juce::Colours::white : juce::Colour (0xbbff9800));
+                g.drawRoundedRectangle (badgeRect, 2.5f, 0.8f);
+                g.setFont (badgeFont);
+                g.setColour (v.isStretchActive ? juce::Colours::white : juce::Colour (0xffffe0b2));
+                g.drawText (headerBadgeStr, badgeRect.toNearestInt(), juce::Justification::centred);
+            }
         }
 
         // 4. Linee verticali dei Warp Markers + badge scostamento in Ticks (e indicatore "Note" se Unlinked)

@@ -1,5 +1,6 @@
 #pragma once
 #include "../keyframe/ayra_KeyframeRowLayout.h"
+#include "../midi/ayra_MidiPreviewGeometry.h"
 #include "../../../modules/ayra_timeline_panel/TimelineHeightPresets.h"
 
 namespace ayra::lab::clips
@@ -2371,7 +2372,10 @@ struct MidiClipLayout
     const clip_midi_law::ZoomLod lod) noexcept
 {
     MidiClipLayout layout;
-    layout.headerBounds = clipBounds.withHeight (juce::jmin (16.0f, clipBounds.getHeight()));
+    const float headerHeight = lod == clip_midi_law::ZoomLod::preview
+        ? midi_preview::headerHeight (clipBounds.getHeight())
+        : juce::jmin (16.0f, clipBounds.getHeight());
+    layout.headerBounds = clipBounds.withHeight (headerHeight);
     auto content = clipBounds.withTrimmedTop (layout.headerBounds.getHeight());
 
     if (lod == clip_midi_law::ZoomLod::noteAndVelocityEdit && content.getHeight() >= 80.0f)
@@ -2463,6 +2467,22 @@ struct MidiNoteGeometry
     const clip_midi_law::ZoomLod lod = clip_midi_law::ZoomLod::noteEdit) noexcept
 {
     const auto pianoBounds = computeMidiClipLayout (clipBounds, lod).pianoRollBounds;
+    if (lod == clip_midi_law::ZoomLod::preview)
+    {
+        // One pixel of breathing room keeps the extreme pitches off the border.
+        const auto area = pianoBounds.reduced (0.0f, juce::jmin (1.0f, pianoBounds.getHeight()*0.1f));
+        const auto noteBounds = midi_preview::project (area.getWidth(), area.getHeight(),
+            note.startNormX, note.endNormX, note.pitch, displayMinPitch, displayMaxPitch, drumMode);
+        if (noteBounds.empty()) return {};
+        MidiNoteGeometry preview;
+        preview.bounds = {area.getX()+noteBounds.x, area.getY()+noteBounds.y,
+                          noteBounds.width, noteBounds.height};
+        preview.centre = preview.bounds.getCentre();
+        preview.drumRadius = noteBounds.radius;
+        preview.rowHeight = area.getHeight() / static_cast<float>(juce::jmax (1,
+            static_cast<int>(displayMaxPitch)-static_cast<int>(displayMinPitch)+1));
+        return preview;
+    }
     const float bodyTop = pianoBounds.getY();
     const float bodyHeight = juce::jmax (10.0f, pianoBounds.getHeight());
     const int minPitch = juce::jlimit (0, 126, static_cast<int> (displayMinPitch));
