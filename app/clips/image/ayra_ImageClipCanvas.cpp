@@ -154,7 +154,10 @@ class ImageClipCanvas final : public juce::Component,
                               public juce::TooltipClient,
                               public clips::ImageClipPresentationProvider {
 public:
+  friend struct CanvasContractAccess; // native contract tests exercise the real canvas
   CanvasViewportBinding panelView;
+  clips::CutRailGroupGesture groupGesture;
+  bool hasPendingPanelGroupGesture()const noexcept{return groupGesture.pending();}
 
   // The identity lens uses the exact clip/edit hit regions (including rails
   // and handles), not an approximate lane-wide temporal rectangle.
@@ -488,6 +491,8 @@ public:
              "timing dei fotogrammi (doppio click per reset, Alt+Click per "
              "eliminare)";
     case TimelineClipZone::bottomCutRail:
+      if(juce::ModifierKeys::getCurrentModifiersRealtime().isShiftDown())
+        return "Glue orizzontale: Shift+clic raggruppa selezione o clip successiva; Shift+doppio clic tutta la lane";
       return "Binario di Taglio (Forbici)\nClicca per dividere la sequenza "
              "immagini nel punto del cursore";
     case TimelineClipZone::clipTitleMove:
@@ -808,10 +813,10 @@ public:
   }
 
   juce::Rectangle<float> clipBounds(const Clip &c, double pps) const {
-    const float topMargin = clipFeatures.warpEnabled ? 12.0f : 4.0f;
-    const float bottomMargin = clipFeatures.cutEnabled ? 14.0f : 4.0f;
-    const float bodyHeight = juce::jmax(10.0f, static_cast<float>(height) -
-                                                   (topMargin + bottomMargin));
+    const auto geometry = ayra::timeline_panel::visual_metrics::ClipRowGeometry::make(
+        static_cast<float>(height), clipFeatures.warpEnabled, clipFeatures.cutEnabled);
+    const float topMargin = geometry.top;
+    const float bodyHeight = geometry.body;
     return {static_cast<float>(panelView.timeToX(c.start,getWidth())), topMargin,
             static_cast<float>(c.length * pps), bodyHeight};
   }
@@ -1107,7 +1112,8 @@ private:
     // mostra anche la linea di opacita'
     visual.features =
         computeClipFeaturesLOD(clipFeatures, localBodyBounds.getHeight(),
-                               isDraggingWarp, isDraggingOpacity);
+                               isDraggingWarp, isDraggingOpacity, static_cast<float>(height));
+    visual.features.glueHover = juce::ModifierKeys::getCurrentModifiersRealtime().isShiftDown();
 
     if (hoveredClipId == clipId ||
         (isDraggedClip && dragZone != TimelineClipZone::none)) {
@@ -1240,7 +1246,7 @@ private:
       return;
 
     const auto pixelsPerSecond = panelView.pixelsPerSecond(getWidth());
-    const float topOverflow = clipFeatures.warpEnabled ? 8.0f : 0.0f;
+    const float topOverflow = clipFeatures.warpEnabled && height >= ayra::timeline_panel::visual_metrics::warpControlsLaneHeight ? 8.0f : 0.0f;
     const float bottomOverflow = clipFeatures.cutEnabled ? 6.0f : 0.0f;
 
     syncActiveImageCrossfades(draggedClipId, false);
@@ -1269,27 +1275,28 @@ private:
   HitResult hitTestZones(juce::Point<float> p) const {
     HitResult res;
     const auto pps = panelView.pixelsPerSecond(getWidth());
-    const bool isDraggingWarp = (activeZone == TimelineClipZone::warpMarker ||
-                                 activeZone == TimelineClipZone::topWarpRail);
-    const bool isDraggingOpacity =
-        (activeZone == TimelineClipZone::gainEnvelopePoint ||
-         activeZone == TimelineClipZone::gainEnvelopeLine ||
-         activeZone == TimelineClipZone::gainSegmentCurveHandle ||
-         activeZone == TimelineClipZone::fadeInCurveHandle ||
-         activeZone == TimelineClipZone::fadeOutCurveHandle ||
-         activeZone == TimelineClipZone::gainPointDashedLine);
+    const bool isDraggingWarp = !draggedClipId.empty() &&
+        (dragZone == TimelineClipZone::warpMarker ||
+                                 dragZone == TimelineClipZone::topWarpRail);
+    const bool isDraggingOpacity = !draggedClipId.empty() &&
+        (dragZone == TimelineClipZone::gainEnvelopePoint ||
+         dragZone == TimelineClipZone::gainEnvelopeLine ||
+         dragZone == TimelineClipZone::gainSegmentCurveHandle ||
+         dragZone == TimelineClipZone::fadeInCurveHandle ||
+         dragZone == TimelineClipZone::fadeOutCurveHandle ||
+         dragZone == TimelineClipZone::gainPointDashedLine);
 
     const auto sortedClips = getClipsSortedByZOrder();
     for (auto it = sortedClips.rbegin(); it != sortedClips.rend(); ++it) {
       const auto &c = **it;
       const auto b = clipBounds(c, pps);
       const auto feat = computeClipFeaturesLOD(
-          clipFeatures, b.getHeight(), isDraggingWarp, isDraggingOpacity);
+          clipFeatures, b.getHeight(), isDraggingWarp, isDraggingOpacity, static_cast<float>(height));
 
       if (p.x >= b.getX() - 6.0f && p.x <= b.getRight() + 6.0f) {
         // A) Barra inferiore di taglio
-        if (feat.showCutRail && p.y >= b.getBottom() &&
-            p.y <= b.getBottom() + 8.0f) {
+        if (feat.showCutRail && p.y >= b.getBottom() + 1.0f &&
+            p.y < b.getBottom() + 7.0f) {
           res.clip = &c;
           res.bounds = b;
           res.zone = TimelineClipZone::bottomCutRail;
@@ -1297,13 +1304,13 @@ private:
         }
 
         // B) Top Warp Rail / Header Top Area
-        if (p.y >= 0.0f && p.y < b.getY()) {
+        if (feat.showWarpControls && p.y >= 0.0f && p.y < b.getY()) {
           res.clip = &c;
           res.bounds = b;
-          res.zone = feat.showWarpRail ? TimelineClipZone::topWarpRail
+          res.zone = feat.showWarpControls ? TimelineClipZone::topWarpRail
                                        : TimelineClipZone::clipTitleMove;
 
-          if (feat.showWarpRail) {
+          if (feat.showWarpControls) {
             const auto &ui = uiStates.at(c.id);
             for (int m = 0; m < static_cast<int>(ui.warpMarkers.size()); ++m) {
               const float curNorm = ui.warpMarkers[static_cast<size_t>(m)];
@@ -1340,12 +1347,12 @@ private:
           // (50..75%), Stretch (75..100%)
           if (p.x <= b.getX() + 2.5f) {
             const float relY = (p.y - b.getY()) / b.getHeight();
-            res.zone = clips::computeClipEdgeZone(true, relY);
+            res.zone = clips::computeClipEdgeZone(true, relY, static_cast<float>(height));
             return res;
           }
           if (p.x >= b.getRight() - 2.5f) {
             const float relY = (p.y - b.getY()) / b.getHeight();
-            res.zone = clips::computeClipEdgeZone(false, relY);
+            res.zone = clips::computeClipEdgeZone(false, relY, static_cast<float>(height));
             return res;
           }
 
@@ -1558,6 +1565,7 @@ private:
   }
 
   void modifierKeysChanged(const juce::ModifierKeys &modifiers) override {
+    repaint();
     const auto active =
         (dragZone != TimelineClipZone::none) ? dragZone : activeZone;
     const auto cid =
@@ -1591,6 +1599,8 @@ private:
 
   void mouseDown(const juce::MouseEvent &e) override {
     const auto hit = hitTestZones(e.position);
+    if(groupGesture.mouseDown(e,hit.clip && hit.zone==TimelineClipZone::bottomCutRail,
+         hit.clip?hit.clip->id:std::string{},panelView.prepareTemporalGroup)){grabKeyboardFocus();return;}
 
     if (hit.clip != nullptr && e.mods.isPopupMenu()) {
       auto context = clips::makeTimelinePointerContext(
@@ -1801,6 +1811,7 @@ private:
   }
 
   void mouseDrag(const juce::MouseEvent &e) override {
+    if(groupGesture.mouseDrag(e))return;
     mousePos = e.position;
 
     if (isResizingLaneHeight) {
@@ -2237,6 +2248,7 @@ private:
   }
 
   void mouseUp(const juce::MouseEvent &e) override {
+    if(groupGesture.mouseUp(e))return;
     if (isResizingLaneHeight) {
       isResizingLaneHeight = false;
       resetDragState();
@@ -2331,6 +2343,7 @@ private:
   }
 
   bool keyPressed(const juce::KeyPress &key) override {
+    if(key==juce::KeyPress::escapeKey && groupGesture.pending()){groupGesture.cancel();return true;}
     // Rollback deterministico della gesture attiva con Escape
     if (key.isKeyCode(juce::KeyPress::escapeKey) && !draggedClipId.empty() &&
         hasDragSnapshot) {
@@ -2389,10 +2402,11 @@ private:
   }
 
   void mouseDoubleClick(const juce::MouseEvent &e) override {
-    if (e.mods.isPopupMenu())
+    if (e.mods.isPopupMenu() || !e.mods.isLeftButtonDown())
       return;
 
     const auto hit = hitTestZones(e.position);
+    if(e.mods.isShiftDown() && hit.zone==TimelineClipZone::bottomCutRail)return;
 
 
     // Se doppio click sul divisore inferiore della traccia
@@ -2516,7 +2530,7 @@ private:
 
     // Surface without a separate double-click action: cycle ONLY the lane's
     // presentation height. Other semantic targets retain their own handlers.
-    if (hit.clip && clip_height_law::isUnclaimedDoubleClickZone(hit.zone,hit.markerIdx)) {
+    if (hit.clip && clip_height_law::isHeaderAreaOrClosedClip(hit.zone,hit.bounds.getHeight(),hit.markerIdx)) {
       if (panelView.enabled && panelView.cycleHeight) panelView.cycleHeight();
       else host.store().resize(data.id, clip_height_law::nextModelHeight(
           static_cast<float>(height), host.getVerticalZoom()));

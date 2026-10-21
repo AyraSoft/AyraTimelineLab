@@ -455,8 +455,11 @@ public:
     {
         const auto* l = lane(id);
         if (!l || l->heightPolicy != HeightPolicy::manual || resize) return false;
-        return setHeight(id, height_presets::next(static_cast<float>(height(id)),
-                                                   l->visual == VisualKind::midi));
+        const auto current=height(id);
+        const auto target=std::clamp(height_presets::next(static_cast<float>(current),
+            l->visual==VisualKind::midi),minimumHeight(*l),maximumHeight(*l));
+        // A host ceiling between canonical levels must not trap the lane open.
+        return setHeight(id,target==current?minimumHeight(*l):target);
     }
     bool setHeight(const Id& id, int pixels)
     {

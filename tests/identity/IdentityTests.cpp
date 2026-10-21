@@ -260,7 +260,7 @@ int main(int argc,char** argv)
             CHECK(l.backdrop.isEmpty()||std::abs(l.backdrop.getCentreY()-area.getCentreY())<=1);
             if(l.twoLines&&!l.type.isEmpty())CHECK(l.track.getRight()==l.type.getRight());
             if(image.isValid())for(int x=0;x<juce::jmin(18,image.getWidth());++x)
-                for(int y=0;y<image.getHeight();++y)CHECK(image.getPixelAt(x,y).getAlpha()==0);
+                for(int y=0;y<image.getHeight();++y)CHECK(image.getPixelAt(left?image.getWidth()-1-x:x,y).getAlpha()==0);
             if(width>=540&&height>=64){CHECK(l.twoLines);CHECK(std::abs(l.backdrop.getCentreY()-area.getCentreY())<=1);CHECK(l.trackFont.getHeightInPoints()==12.5f);}
         }
         for(bool left:{false,true})for(float scale:{1.0f,1.25f,1.5f,2.0f})

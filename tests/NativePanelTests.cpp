@@ -54,6 +54,15 @@ juce::MouseEvent event(juce::Component& target,juce::Point<float> position,int c
             start,juce::Time::getCurrentTime(),clicks,drag};
 }
 void pump(){juce::MessageManager::getInstance()->runDispatchLoopUntil(10);}
+// Native timers are message-thread scheduled, not hard real-time. The pure
+// hover-state tests assert the exact 500ms law; peer tests allow bounded CI
+// dispatch jitter without weakening the required final state.
+template<class Predicate> bool waitFor(Predicate ready)
+{
+    const auto limit=juce::Time::getMillisecondCounterHiRes()+1500.0;
+    while(!ready()&&juce::Time::getMillisecondCounterHiRes()<limit)pump();
+    return ready();
+}
 Snapshot fixture(int count)
 {
     Snapshot s;s.session="native-test";s.revision=1;
@@ -110,16 +119,17 @@ void cardStatusContracts()
     auto* arrow=find(p,"card-nav:next:1");CHECK(arrow);
     auto arrowPoint=p.getLocalPoint(arrow,arrow->getLocalBounds().getCentre());
     pointer(arrowPoint);CHECK(!p.hasPendingIdentityTransition());wait(550);CHECK(!p.isIdentitySuppressed("1"));
-    pointer(point);CHECK(p.hasPendingIdentityTransition());wait(100);CHECK(!p.isIdentitySuppressed("1"));wait(450);
-    CHECK(p.isIdentitySuppressed("1"));CHECK(!arrow->isShowing());CHECK(!p.hasPendingIdentityTransition());
+    pointer(point);CHECK(p.hasPendingIdentityTransition());wait(100);CHECK(!p.isIdentitySuppressed("1"));
+    CHECK(waitFor([&]{return p.isIdentitySuppressed("1");}));CHECK(!arrow->isShowing());CHECK(!p.hasPendingIdentityTransition());
     CHECK(p.getComponentAt(arrowPoint)==canvas); // no invisible navigation targets
     pointer({lens.getX()+2,lens.getY()+2});CHECK(p.isIdentitySuppressed("1"));
     pointer({lens.getX()-3,lens.getCentreY()});CHECK(!p.isIdentitySuppressed("1"));CHECK(arrow->isShowing());
     // Repaint/normal pointer motion cannot manufacture new domain commands.
     canvas->mouseDoubleClick(event(*canvas,q,2));CHECK(records["1"].doubled==1);CHECK(commands==0);
-    // Continuous lanes: manual resize yes, double-click height cycle no.
+    // Continuous lanes share the same accent/separator height cycle as clips.
     auto* resize=find(p,"resize:1");CHECK(resize&&resize->isVisible());
-    const auto old=c.height("1");resize->mouseDoubleClick(event(*resize,{3,1},2));CHECK(c.height("1")==old);
+    const auto old=c.height("1");resize->mouseDoubleClick(event(*resize,{3,1},2));CHECK(c.height("1")==height_presets::expanded);
+    CHECK(c.undoView());p.refresh();CHECK(c.height("1")==old);
     resize->mouseDown(event(*resize,{3,1}));resize->mouseDrag(event(*resize,{3,21},1,juce::ModifierKeys::leftButtonModifier,{3,1},true));
     resize->mouseUp(event(*resize,{3,21}));CHECK(c.height("1")==old+20);CHECK(c.undoView());p.refresh();
     // State changes propagate to siblings; no inferred active monitor in Auto.
@@ -144,11 +154,7 @@ void cardStatusContracts()
     p.setVisible(false);CHECK(!p.hasPendingIdentityTransition());wait(550);
     p.setVisible(true);p.refresh();wait(100);pointer(point); // let the native window-manager remap settle
     CHECK(!p.isIdentitySuppressed("1"));CHECK(p.hasPendingIdentityTransition());
-    // Deadline law is tested with injected time. Native Timer delivery is
-    // message-thread scheduled, so allow bounded dispatch jitter under CI load.
-    const auto limit=juce::Time::getMillisecondCounterHiRes()+1500;
-    while(!p.isIdentitySuppressed("1")&&juce::Time::getMillisecondCounterHiRes()<limit)pump();
-    CHECK(p.isIdentitySuppressed("1"));
+    CHECK(waitFor([&]{return p.isIdentitySuppressed("1");}));
     p.setIdentityNavigation(false);CHECK(!find(p,"card-nav:next:0")->isShowing());
     p.removeFromDesktop();CHECK(commands==1);
 }void adaptiveTitleContracts()
@@ -196,7 +202,7 @@ void cardStatusContracts()
     CHECK(p.getIdentityBounds("0").getWidth()>small.getWidth());CHECK(!p.hasPendingIdentityTransition());
     // Leave ONLY the protected targets: metadata starts the existing delay.
     auto lens=p.getIdentityBounds("0");pointer({lens.getRight()-90,lens.getY()+6});
-    CHECK(p.hasPendingIdentityTransition());wait(550);CHECK(p.isIdentitySuppressed("0"));
+    CHECK(p.hasPendingIdentityTransition());CHECK(waitFor([&]{return p.isIdentitySuppressed("0");}));
     CHECK(!find(p,"identity-title:0")->isShowing());CHECK(!arrow->isShowing());
     pointer({10,5});CHECK(!p.isIdentitySuppressed("0"));
     auto* editor=begin("0");CHECK(editor->getText()==text(original));
@@ -320,7 +326,7 @@ int main()
     pointer(centre);CHECK(!panel.isIdentitySuppressed("0"));
     records["0"].clip={local.x-6,local.y-6,12,12};
     panel.notifyCanvasContentChanged("0");
-    juce::MessageManager::getInstance()->runDispatchLoopUntil(550);CHECK(panel.isIdentitySuppressed("0"));
+    CHECK(waitFor([&]{return panel.isIdentitySuppressed("0");}));
     CHECK(panel.getIdentityBounds("0")==lens);CHECK(panel.getComponentAt(centre)==canvas);
     pointer({lens.getX()+2,lens.getY()+2});CHECK(panel.isIdentitySuppressed("0"));
     records["0"].clip={};panel.notifyCanvasContentChanged("0");CHECK(panel.isIdentitySuppressed("0"));
@@ -351,8 +357,7 @@ int main()
     const auto leftPoint=juce::Point<int>{lens.getX()+28,lens.getY()+8};
     const auto leftLocal=canvas->getLocalPoint(&panel,leftPoint).toFloat();
     records["0"].clip={leftLocal.x-10,leftLocal.y-10,20,20};pointer(leftPoint);
-    juce::MessageManager::getInstance()->runDispatchLoopUntil(550);
-    CHECK(panel.isIdentitySuppressed("0"));pointer({lens.getRight()+4,lens.getCentreY()});
+    CHECK(waitFor([&]{return panel.isIdentitySuppressed("0");}));pointer({lens.getRight()+4,lens.getCentreY()});
     CHECK(!panel.isIdentitySuppressed("0"));records["0"].clip={};
     row=find(panel,"lane:0");row->mouseDown(event(*row,{1,20}));row->mouseUp(event(*row,{1,20}));CHECK(controller.view().selectedLanes.contains("0"));
     auto* row1=find(panel,"lane:1");auto ctrl=juce::ModifierKeys(juce::ModifierKeys::leftButtonModifier|juce::ModifierKeys::ctrlModifier);

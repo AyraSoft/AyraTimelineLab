@@ -38,7 +38,7 @@ public:
         juce::Graphics g(result); g.addTransform(juce::AffineTransform::scale(2.0f));
         const auto r = area.withPosition(0, 0).toFloat();
         const bool dark = ayra::tokens::detail::dark();
-        const auto glass = dark ? juce::Colour(0xff111724) : juce::Colour(0xffeef2fa);
+        const auto glass = dark ? juce::Colour(0xff080d16) : juce::Colour(0xffdbe1ed);
         // Strong legibility core with a light-aware outward dissolve; never a full-height header.
         // Mirror the direction when docked right, not the text or its hierarchy.
         const float sign = content.onLeft ? 1.0f : -1.0f;
@@ -47,7 +47,8 @@ public:
         const auto a = r.getCentre() - juce::Point<float>(dx, dy) * (length * 0.5f);
         const auto b = r.getCentre() + juce::Point<float>(dx, dy) * (length * 0.5f);
         juce::ColourGradient gradient(glass.withAlpha(dark?0.96f:0.91f), a, glass.withAlpha(0.0f), b, false);
-        gradient.addColour(0.74, glass.withAlpha(dark?0.74f:0.68f));
+        // Keep the whole text area legible; dissolve only near the feathered edge.
+        gradient.addColour(0.88, glass.withAlpha(dark?0.91f:0.86f));
         g.setGradientFill(gradient); g.fillRoundedRectangle(r, 7.0f);
         // Bake the rim into the same feathered material. An unmasked vector
         // highlight would reveal the very left corners we intend to dissolve.
@@ -78,12 +79,10 @@ public:
             const auto lens=layout.backdrop.translated(-bounds.getX(),-bounds.getY()).toFloat();
             const auto outer=layout.onLeft?lens.getRight():lens.getX();
             const auto inward=layout.onLeft?-1.0f:1.0f;
-            juce::ColourGradient fade(juce::Colours::transparentWhite,outer-inward*0.0f,lens.getY(),
+            juce::ColourGradient fade(juce::Colours::transparentWhite,outer+inward*9.0f,lens.getY(),
                                       juce::Colours::white,outer+inward*25.0f,lens.getY(),false);
-            // One mask serves the material, frosted underlay and rim; fade is
-            // mirrored but text/alignment remain independent of orientation.
             for(int i=1;i<8;++i)
-                fade.addColour(i/8.0,juce::Colours::white.withAlpha(outerAlpha(25.0f*i/8.0f)));
+                fade.addColour(i/8.0,juce::Colours::white.withAlpha(outerAlpha(9.0f+16.0f*i/8.0f)));
             m.setGradientFill(fade);m.fillRoundedRectangle(lens,7.0f);
         }
         juce::Image result(juce::Image::ARGB,source.getWidth(),source.getHeight(),true);

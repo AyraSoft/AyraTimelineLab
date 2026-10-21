@@ -64,13 +64,14 @@ struct TimelineIdentityLayout
         const int letters=(c.muted?measuredWidth(out.trackFont,"M")+4:0)+(c.soloed?measuredWidth(out.trackFont,"S")+4:0);
         const int natural=out.twoLines?juce::jmax(perfWidth+(perfWidth&&typeGroup?10:0)+typeGroup,titleWidth+letters)
                                      :titleWidth+letters+typeGroup+(typeGroup?8:0)+(perfWidth?perfWidth+8:0)+(c.compact&&c.showType?9:0);
-        const int inset=juce::jmin(8,area.getWidth()/8);
-        const int available=juce::jmax(0,area.getWidth()-2*inset);
+        const int leftInset=juce::jmin(8,area.getWidth()/8);
+        const int rightInset=juce::jmin(14,area.getWidth()/8);
+        const int available=juce::jmax(0,area.getWidth()-leftInset-rightInset);
         const int limit=c.expanded?available:juce::jmin(available,maxWidth);
-        const int width=juce::jmin(limit,juce::jmax(minWidth,natural+38+(serviceWidth?serviceWidth+4:0)));
+        const int width=juce::jmin(limit,juce::jmax(minWidth,natural+41+(serviceWidth?serviceWidth+4:0)));
         const int height=juce::jmin(area.getHeight(),out.twoLines?normalHeight:22);
         const int top=area.getY()+(area.getHeight()-height)/2;
-        out.backdrop={c.onLeft?area.getX()+inset:area.getRight()-inset-width,top,width,height};
+        out.backdrop={c.onLeft?area.getX()+leftInset:area.getRight()-rightInset-width,top,width,height};
         const auto inner=out.backdrop.withTrimmedLeft(juce::jmin(c.onLeft?14:27,width/5))
                                     .withTrimmedRight(juce::jmin(c.onLeft?27:14,width/5));
         if(inner.isEmpty())return out;

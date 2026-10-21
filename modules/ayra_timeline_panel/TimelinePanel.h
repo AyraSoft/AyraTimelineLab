@@ -686,6 +686,7 @@ private:
                 inside=withinView&&identityLayout.backdrop.toFloat().contains(p);
             }
             const bool protectedTarget=onNavigation||onTitle;
+            const bool passiveTitle=inside&&!canRenameTitle()&&identityLayout.titleHit.toFloat().contains(p);
             bool editable=false;
             if(inside&&!protectedTarget&&!identityHover.hidden()&&canvas.component) {
                 const auto local=canvas.component->getLocalPoint(this,p);
@@ -695,9 +696,9 @@ private:
                     else if(canvas.containsClipAt)editable=canvas.containsClipAt(local);
                 }
             }
-            if(identityHover.update(inside,editable,protectedTarget,
+            if(identityHover.update(inside,editable||passiveTitle,protectedTarget,
                                     juce::Time::getMillisecondCounterHiRes(),
-                                    editing || (inside && editable && !canRenameTitle()))) {
+                                    editing || passiveTitle)) {
                 underlayDirty=true;repaint(identityLayout.backdrop);
             }
             identitySurface.setVisible(!identityHover.hidden());

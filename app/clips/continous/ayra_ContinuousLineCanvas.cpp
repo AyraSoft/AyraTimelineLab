@@ -172,6 +172,7 @@ private:
     {
         ContinuousLineVisual visual;
         visual.bounds              = localBodyBounds;
+        visual.previewOnly         = height < ayra::timeline_panel::visual_metrics::warpControlsLaneHeight;
         visual.tint                = juce::Colour (data.colour != 0 ? data.colour : 0xff2dd4bf);
         visual.curveColour         = curveColour;
         visual.activeNodeColour    = juce::Colour (0xfff97316); // Arancio attivo stile screenshot TEMPO
@@ -208,6 +209,7 @@ private:
         outZone = TimelineClipZone::none;
         outPointIdx = -1;
         outSegIdx = -1;
+        if(height < ayra::timeline_panel::visual_metrics::warpControlsLaneHeight)return;
 
         const auto b = clips::computeContinuousLineLayout (
             panelView.domainBounds(juce::Rectangle<float> (0.0f, 0.0f,
@@ -341,6 +343,7 @@ private:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if(height < ayra::timeline_panel::visual_metrics::warpControlsLaneHeight)return;
         grabKeyboardFocus();
         hitTestLine (e.position, dragZone, draggedPointIdx, draggedSegmentIdx);
 
@@ -565,7 +568,8 @@ private:
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
-        if (e.mods.isPopupMenu() || getWidth() <= 0 || height <= 0) return;
+        if (e.mods.isPopupMenu() || !e.mods.isLeftButtonDown() || getWidth() <= 0
+            || height < ayra::timeline_panel::visual_metrics::warpControlsLaneHeight) return;
 
         if (!panelView.enabled && (e.position.y >= getHeight() - 6.0f || e.position.y <= 24.0f))
         {

@@ -41,7 +41,7 @@ void ClipDefaultLookAndFeel::drawAutomationCurve (
         b, p.points, p.numPoints, boundary);
 
     // 1. Costruzione della curva di Bezier quadratica unificata
-    juce::Path envLine;
+    juce::Path envLine, editableLine;
     const auto startPixel = automationPointPixelPosition (
         b, p.points[0], 0, p.numPoints);
 
@@ -55,6 +55,7 @@ void ClipDefaultLookAndFeel::drawAutomationCurve (
         envLine.startNewSubPath (startPixel);
     }
 
+    editableLine.startNewSubPath(startPixel);
     for (int s = 0; s + 1 < p.numPoints; ++s)
     {
         const auto& p0 = p.points[s];
@@ -73,6 +74,8 @@ void ClipDefaultLookAndFeel::drawAutomationCurve (
             envLine,
             makeBoundedCurvePixelSegment (
                 startSegmentPixel, endPixel, control));
+        appendBoundedCurvePixelSegment(editableLine,
+            makeBoundedCurvePixelSegment(startSegmentPixel,endPixel,control));
     }
 
     if (boundaryGeometry.hasFadeOut)
@@ -84,6 +87,15 @@ void ClipDefaultLookAndFeel::drawAutomationCurve (
                       ? ayra::getCommonLAF (*visualOwner)
                       : static_cast<ayra::CommonLookAndFeelMethods&> (
                             ayra::CommonDefaultLookAndFeel::getDefaultInstance());
+
+    if(p.previewOnly)
+    {
+        g.setColour(p.curveColour.withMultipliedAlpha(0.85f));
+        g.strokePath(editableLine,juce::PathStrokeType(0.75f));
+        if(boundaryGeometry.hasFadeIn)drawNonInsertableFade(g,boundaryGeometry.fadeIn,p.curveColour,true);
+        if(boundaryGeometry.hasFadeOut)drawNonInsertableFade(g,boundaryGeometry.fadeOut,p.curveColour,true);
+        return; // No underlay, guide, point, handle or badge in preview mode.
+    }
 
     // 2. Riempimento selezionato dal consumer; la ricetta resta nel modulo ayra_ui.
     timelineLaf.drawTimelineAutomationCurveUnderlay (g, envLine, b, p.underlayStyle);
@@ -146,23 +158,9 @@ void ClipDefaultLookAndFeel::drawAutomationCurve (
     }
 
     // 4. Linea TimelineLab: alone scuro + tratto crisp.
-    timelineLaf.drawTimelineAutomationCurveStroke (g, envLine, p.curveColour);
-    // Endpoint fade segments are constrained boundary geometry, NOT point-
-    // insertion segments. Short neutral dashes make that visible immediately;
-    // the editable internal body remains drawn by the canonical Ayra stroke.
-    const auto drawConstrainedFade = [&](const BoundedCurvePixelSegment& seg)
-    {
-        juce::Path src;src.startNewSubPath(seg.start);appendBoundedCurvePixelSegment(src,seg);
-        constexpr float dashes[] { 3.0f, 2.5f };
-        juce::Path overlay;
-        juce::PathStrokeType(1.6f,juce::PathStrokeType::curved,
-                             juce::PathStrokeType::rounded).createDashedStroke(overlay,src,dashes,2);
-        g.setColour(p.curveColour.interpolatedWith(tk::textSecondary(),0.55f).withAlpha(0.90f));
-        g.fillPath(overlay);
-    };
-    if (boundaryGeometry.hasFadeIn)drawConstrainedFade(boundaryGeometry.fadeIn);
-    if (boundaryGeometry.hasFadeOut)drawConstrainedFade(boundaryGeometry.fadeOut);
-
+    timelineLaf.drawTimelineAutomationCurveStroke (g, editableLine, p.curveColour);
+    if(boundaryGeometry.hasFadeIn)drawNonInsertableFade(g,boundaryGeometry.fadeIn,p.curveColour,false);
+    if(boundaryGeometry.hasFadeOut)drawNonInsertableFade(g,boundaryGeometry.fadeOut,p.curveColour,false);
 
     // 5. Handle di curvatura TimelineLab per ogni segmento intermedio.
     auto drawCurveHollowHandle = [&] (juce::Point<float> centre, bool active)
@@ -293,9 +291,9 @@ void ClipDefaultLookAndFeel::drawAudioClip (
                                     : tint.interpolatedWith (juce::Colour (0xff0b171e), 0.82f);
 
         // 2. Linee orizzontali sottili di divisione canali, waveform reali e badge canale
-        const float waveformTop = v.bounds.getY() + audioClipTitleAreaHeight;
+        const float waveformTop = v.bounds.getY() + (v.features.showEnvelopePreview ? 2.0f : audioClipTitleAreaHeight);
         const float waveformHeight = juce::jmax (
-            10.0f, v.bounds.getHeight() - audioClipTitleAreaHeight);
+            1.0f, v.bounds.getBottom() - waveformTop - (v.features.showEnvelopePreview ? 2.0f : 0.0f));
 
         const int numCh = juce::jmax (1, v.numChannels);
         const float chH = waveformHeight / (float) numCh;
@@ -466,15 +464,18 @@ void ClipDefaultLookAndFeel::drawAudioClip (
 
         // 5. Unico inviluppo Gain: primo e ultimo punto sono anche gli
         // endpoint di fade-in/fade-out, senza una seconda curva sovrapposta.
-        if (v.features.showGainEnvelope)
+        if (v.features.showGainEnvelope || v.features.showEnvelopePreview)
         {
             constexpr int kMaxStack = 64;
-            AutomationPoint stackPts[kMaxStack];
+            AutomationPoint inlinePoints[kMaxStack];
+            std::vector<AutomationPoint> longEnvelope;
+            if(v.numGainPoints>kMaxStack)longEnvelope.resize(static_cast<std::size_t>(v.numGainPoints));
+            auto* stackPts=longEnvelope.empty()?inlinePoints:longEnvelope.data();
             int nPts = 0;
 
             if (v.gainPoints != nullptr && v.numGainPoints >= 2)
             {
-                nPts = std::min (v.numGainPoints, kMaxStack);
+                nPts = v.numGainPoints;
                 for (int p = 0; p < nPts; ++p)
                 {
                     stackPts[p].normX = v.gainPoints[p].normX;
@@ -495,7 +496,9 @@ void ClipDefaultLookAndFeel::drawAudioClip (
             }
 
             AutomationCurveParams curveParams;
-            curveParams.bounds = juce::Rectangle<float> (v.bounds.getX(), waveformTop, v.bounds.getWidth(), waveformHeight);
+            curveParams.previewOnly=v.features.showEnvelopePreview;
+            curveParams.bounds = curveParams.previewOnly ? compactEnvelopeBounds(v.bounds)
+                : juce::Rectangle<float> (v.bounds.getX(), waveformTop, v.bounds.getWidth(), waveformHeight);
             curveParams.boundaryPolicy = AutomationBoundaryPolicy::fadeEndpoints;
             curveParams.fadeInControl = {
                 v.fadeInControlX, v.fadeInCurve, v.fadeInControlWeight
@@ -524,7 +527,7 @@ void ClipDefaultLookAndFeel::drawAudioClip (
         }
 
         // Se in hover sul taglio, riga laser verticale interna alla clip
-        const bool cutHover = v.features.showCutRail && (v.hoveredZone == TimelineClipZone::bottomCutRail);
+        const bool cutHover = v.features.showCutRail && !v.features.glueHover && (v.hoveredZone == TimelineClipZone::bottomCutRail);
         if (cutHover && v.hoverMouseX >= v.bounds.getX() && v.hoverMouseX <= v.bounds.getRight())
         {
             g.setColour (juce::Colours::white.withAlpha (0.9f));
@@ -537,7 +540,7 @@ void ClipDefaultLookAndFeel::drawAudioClip (
     g.drawRoundedRectangle (v.bounds.reduced (0.5f), corner, v.selected ? 1.5f : 1.0f);
 
     // 7. Triangolini Warp Markers (SPORGONO ESCLUSIVAMENTE FUORI SOPRA LA CLIP)
-    if (v.features.showWarpRail && v.warpMarkersNorm != nullptr)
+    if (v.features.showWarpControls && v.warpMarkersNorm != nullptr)
     {
         for (int i = 0; i < v.numWarpMarkers; ++i)
         {
@@ -558,7 +561,7 @@ void ClipDefaultLookAndFeel::drawAudioClip (
     }
 
     // 7b. Indicatore "+" per aggiunta nuovo Warp Marker (SOLO bottone "+", nessun triangolo ghost come richiesto)
-    if (v.features.showWarpRail && v.showWarpAddGhost && v.warpAddGhostX >= v.bounds.getX() && v.warpAddGhostX <= v.bounds.getRight())
+    if (v.features.showWarpControls && v.showWarpAddGhost && v.warpAddGhostX >= v.bounds.getX() && v.warpAddGhostX <= v.bounds.getRight())
     {
         const float gx = v.warpAddGhostX;
         const float gy = v.bounds.getY() - 4.0f;
@@ -956,7 +959,7 @@ void ClipDefaultLookAndFeel::drawMidiClip (
         }
 
         // Riga laser verticale in hover sul taglio
-        const bool cutHover = v.features.showCutRail && (v.hoveredZone == TimelineClipZone::bottomCutRail);
+        const bool cutHover = v.features.showCutRail && !v.features.glueHover && (v.hoveredZone == TimelineClipZone::bottomCutRail);
         if (cutHover && v.hoverMouseX >= v.bounds.getX() && v.hoverMouseX <= v.bounds.getRight())
         {
             g.setColour (juce::Colours::white.withAlpha (0.9f));
@@ -969,7 +972,7 @@ void ClipDefaultLookAndFeel::drawMidiClip (
     g.drawRoundedRectangle (v.bounds.reduced (0.5f), corner, v.selected ? 1.5f : 1.0f);
 
     // 7. Triangolini Warp Markers esterni superiori
-    if (v.features.showWarpRail && v.warpMarkersNorm != nullptr)
+    if (v.features.showWarpControls && v.warpMarkersNorm != nullptr)
     {
         for (int i = 0; i < v.numWarpMarkers; ++i)
         {
@@ -991,7 +994,7 @@ void ClipDefaultLookAndFeel::drawMidiClip (
     }
 
     // 7b. Bottone "+" per aggiunta nuovo Warp Marker
-    if (v.features.showWarpRail && v.showWarpAddGhost && v.warpAddGhostX >= v.bounds.getX() && v.warpAddGhostX <= v.bounds.getRight())
+    if (v.features.showWarpControls && v.showWarpAddGhost && v.warpAddGhostX >= v.bounds.getX() && v.warpAddGhostX <= v.bounds.getRight())
     {
         const float gx = v.warpAddGhostX;
         const float gy = v.bounds.getY() - 4.0f;
@@ -1097,7 +1100,7 @@ void ClipDefaultLookAndFeel::drawLineClip (
         g.reduceClipRegion (bodyPath);
 
         constexpr float kTitleAreaHeight = 16.0f;
-        const auto bodyArea = v.bounds.withTrimmedTop (kTitleAreaHeight);
+        const auto bodyArea = v.features.showEnvelopePreview ? compactEnvelopeBounds(v.bounds) : v.bounds.withTrimmedTop (kTitleAreaHeight);
 
         // 2. Titolo della clip in TOP CENTER + badge scostamento stretch in Ticks
         const auto titleFont = tk::type::body().boldened().withHeight (12.0f);
@@ -1201,7 +1204,7 @@ void ClipDefaultLookAndFeel::drawLineClip (
         drawClipStateAndAuditionOverlay (g, v.bounds, v.state, tint);
 
         // 4. Inviluppo Linea: motore unificato con la policy della clip.
-        if (v.features.showGainEnvelope && v.points != nullptr && v.numPoints >= 2)
+        if ((v.features.showGainEnvelope || v.features.showEnvelopePreview) && v.points != nullptr && v.numPoints >= 2)
         {
             if (v.renderMode == LineClipRenderMode::gateBlock)
             {
@@ -1210,18 +1213,23 @@ void ClipDefaultLookAndFeel::drawLineClip (
                     const float x0 = bodyArea.getX() + juce::jlimit (0.0f, 1.0f, v.points[i].normX) * bodyArea.getWidth();
                     const float x1 = bodyArea.getX() + juce::jlimit (0.0f, 1.0f, v.points[i + 1].normX) * bodyArea.getWidth();
                     const float y0 = bodyArea.getBottom() - juce::jlimit (0.0f, 1.0f, v.points[i].normY) * bodyArea.getHeight();
-                    if (v.points[i].normY >= 0.5f)
+                    if (!v.features.showEnvelopePreview && v.points[i].normY >= 0.5f)
                     {
                         g.setColour (tint.withAlpha (0.42f));
                         g.fillRect (juce::Rectangle<float> (x0, bodyArea.getY(), juce::jmax (1.0f, x1 - x0), bodyArea.getHeight()));
                     }
                     g.setColour (tint.withAlpha (0.95f));
-                    g.drawLine (x0, y0, x1, y0, 1.8f);
+                    g.drawLine (x0, y0, x1, y0, v.features.showEnvelopePreview ? 0.75f : 1.8f);
+                    if(v.features.showEnvelopePreview && i+2<v.numPoints) {
+                        const float nextY=bodyArea.getBottom()-juce::jlimit(0.0f,1.0f,v.points[i+1].normY)*bodyArea.getHeight();
+                        g.drawLine(x1,y0,x1,nextY,0.75f);
+                    }
                 }
             }
             else
             {
                 AutomationCurveParams curveParams;
+                curveParams.previewOnly = v.features.showEnvelopePreview;
                 curveParams.bounds = bodyArea;
                 curveParams.boundaryPolicy = v.boundaryPolicy;
                 curveParams.boundaryStartNormValue = v.boundaryStartNormValue;
@@ -1258,7 +1266,7 @@ void ClipDefaultLookAndFeel::drawLineClip (
         }
 
         // 5. Laser verticale sul taglio
-        const bool cutHover = v.features.showCutRail && (v.hoveredZone == TimelineClipZone::bottomCutRail);
+        const bool cutHover = v.features.showCutRail && !v.features.glueHover && (v.hoveredZone == TimelineClipZone::bottomCutRail);
         if (cutHover && v.hoverMouseX >= v.bounds.getX() && v.hoverMouseX <= v.bounds.getRight())
         {
             g.setColour (juce::Colours::white.withAlpha (0.9f));
@@ -1271,7 +1279,7 @@ void ClipDefaultLookAndFeel::drawLineClip (
     g.drawRoundedRectangle (v.bounds.reduced (0.5f), corner, v.selected ? 1.5f : 1.0f);
 
     // 7. Triangolini Warp Markers esterni superiori
-    if (v.features.showWarpRail && v.warpMarkersNorm != nullptr)
+    if (v.features.showWarpControls && v.warpMarkersNorm != nullptr)
     {
         for (int i = 0; i < v.numWarpMarkers; ++i)
         {
@@ -1293,7 +1301,7 @@ void ClipDefaultLookAndFeel::drawLineClip (
     }
 
     // 7b. Bottone "+" per aggiunta nuovo Warp Marker
-    if (v.features.showWarpRail && v.showWarpAddGhost && v.warpAddGhostX >= v.bounds.getX() && v.warpAddGhostX <= v.bounds.getRight())
+    if (v.features.showWarpControls && v.showWarpAddGhost && v.warpAddGhostX >= v.bounds.getX() && v.warpAddGhostX <= v.bounds.getRight())
     {
         const float gx = v.warpAddGhostX;
         const float gy = v.bounds.getY() - 4.0f;
@@ -1403,6 +1411,7 @@ void ClipDefaultLookAndFeel::drawContinuousLine (
     {
         AutomationCurveParams curveParams;
         curveParams.bounds = graph;
+        curveParams.previewOnly = v.previewOnly;
         curveParams.boundaryPolicy = AutomationBoundaryPolicy::pinnedEndpoints;
         curveParams.curveColour = v.suspended ? v.curveColour.darker().darker()
                                                 : v.curveColour;

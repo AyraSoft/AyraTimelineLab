@@ -31,8 +31,8 @@ if [[ ! -f "$JUCE_DIR/CMakeLists.txt" ]]; then
     printf '%s\n' 'Set JUCE_SOURCE_DIR to an existing official JUCE 8 checkout.' >&2
     exit 1
 fi
-if [[ ! -f "$MODULES_DIR/ayra_curves/ayra_curves.h" || ! -f "$MODULES_DIR/ayra_timeline/ayra_timeline_presentation.h" ]]; then
-    printf '%s\n' 'Set AYRA_MODULES_DIR to the directory containing ayra_curves and ayra_timeline (caa00902 or newer).' >&2
+if [[ ( ! -f "$MODULES_DIR/ayra_curves/ayra_curves.h" && ! -f "$MODULES_DIR/ayra_math/curves/ayra_CurveSegment.h" ) || ! -f "$MODULES_DIR/ayra_timeline/ayra_timeline_presentation.h" ]]; then
+    printf '%s\n' 'Set AYRA_MODULES_DIR to the directory containing ayra_curves (or ayra_math) and ayra_timeline (caa00902 or newer).' >&2
     exit 1
 fi
 if [[ ! -f "$PROJECT_ROOT/ayra_ui/melatonin_blur/melatonin_blur.h" ]]; then

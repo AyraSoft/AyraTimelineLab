@@ -38,6 +38,7 @@ public:
     std::function<void(const clips::TimelinePointerContext&)>
         onTimelineContextMenuRequested;
     std::function<void(const std::string&)> onPanelHeightCycle;
+    std::function<std::function<void(bool)>(const std::string&,const std::string&)> onPrepareTemporalGroup;
     void updateClipFade(const std::string& trackId, const std::string& clipId, double fadeIn, double fadeOut);
     /** Commits the structural split and returns the committed right-hand clip id.
         An empty id means the model rejected the operation. */

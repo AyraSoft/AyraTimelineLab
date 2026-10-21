@@ -896,28 +896,46 @@ int main()
         require (clip_midi_law::noteAndVelocityTrackHeight == clip_height_law::fullTrackHeight,
                  "clip_midi_law::noteAndVelocityTrackHeight must match clip_height_law::fullTrackHeight");
 
-        require (clip_height_law::compactTrackHeight == 24,
-                 "compact media preview should match a single event row");
-        require (clip_height_law::nextCanonicalHeight (24.0f) == 400,
-                 "audio/image/automation should expand directly from 24 to 400");
-        require (clip_height_law::nextCanonicalHeight (400.0f) == 24,
-                 "audio/image/automation must return directly to 24");
-        require (clip_height_law::nextCanonicalHeight (24.0f, true) == 256
-                 && clip_height_law::nextCanonicalHeight (256.0f, true) == 400
-                 && clip_height_law::nextCanonicalHeight (400.0f, true) == 24,
-                 "MIDI cycles 24 -> 256 -> 400 -> 24");
-        require (clip_height_law::nextModelHeight (24.0f, 2.0f) == 200,
-                 "visual heights transform through legacy zoom exactly once");
-        require (clip_height_law::isUnclaimedDoubleClickZone (TimelineClipZone::clipBody)
-                 && clip_height_law::isUnclaimedDoubleClickZone (TimelineClipZone::none)
-                 && clip_height_law::isUnclaimedDoubleClickZone (TimelineClipZone::midiNoteBody),
-                 "unclaimed body clicks request height cycling");
+        require (clip_height_law::compactTrackHeight == keyframe_lane_layout::contentHeight(1,true),
+                 "compact height is the actual event-span height including cut rail");
+        require (clip_height_law::nextCanonicalHeight (32.0f) == 400
+                 && clip_height_law::nextCanonicalHeight (400.0f) == 32,
+                 "non-MIDI has precisely two presentation levels");
+        require (clip_height_law::nextCanonicalHeight (32.0f,true) == 256
+                 && clip_height_law::nextCanonicalHeight (256.0f,true) == 400
+                 && clip_height_law::nextCanonicalHeight (400.0f,true) == 32,
+                 "MIDI cycles compact, note editor, note+velocity editor");
+        require (clip_midi_law::zoomLodForTrackHeight(256)==clip_midi_law::ZoomLod::noteEdit
+                 && clip_midi_law::zoomLodForTrackHeight(400)==clip_midi_law::ZoomLod::noteAndVelocityEdit,
+                 "MIDI levels must reach real semantic editing states");
+        require (clip_height_law::nextModelHeight(32,2)==200,"legacy zoom applied exactly once");
+        require (clip_height_law::isHeaderAreaOrClosedClip(TimelineClipZone::clipTitleMove,300)
+                 && clip_height_law::isHeaderAreaOrClosedClip(TimelineClipZone::none,18)
+                 && !clip_height_law::isHeaderAreaOrClosedClip(TimelineClipZone::none,300),
+                 "old hit policy, independent from new height action");
         for (auto zone : {TimelineClipZone::gainEnvelopeLine, TimelineClipZone::gainEnvelopePoint,
                           TimelineClipZone::warpMarker, TimelineClipZone::fadeInCurveHandle,
                           TimelineClipZone::fadeOutCurveHandle, TimelineClipZone::edgeLeftTrim,
-                          TimelineClipZone::midiPitchScrollbar})
-            require (!clip_height_law::isUnclaimedDoubleClickZone (zone),
-                     "specialized double clicks must retain their existing behavior");
+                          TimelineClipZone::midiPitchScrollbar,TimelineClipZone::midiNoteBody,
+                          TimelineClipZone::midiVelocityStem,TimelineClipZone::bottomCutRail})
+            require (!clip_height_law::isHeaderAreaOrClosedClip(zone,18),
+                     "specialist double clicks never change height even at the compact level");
+        for(int height=32;height<=128;++height) {
+            using namespace ayra::timeline_panel::visual_metrics;
+            const auto layout=ClipRowGeometry::make(height,true,true);
+            const auto f=computeClipFeaturesLOD({},layout.body,false,false,static_cast<float>(height));
+            require(f.showWarpRail,"internal warp lines never vanish with vertical zoom");
+            require(f.showWarpControls==(height>=64),"warp control threshold is LANE height");
+            require(f.showGainEnvelope!=f.showEnvelopePreview,"preview and editor are exclusive");
+            require(layout.top+layout.body+cutRailExtent+eventPadding==height,"compact geometry fits the lane");
+            for(float rel:{0.1f,0.35f,0.6f,0.9f})for(bool left:{false,true})
+                if(height<96)require(computeClipEdgeZone(left,rel,height)==(left?TimelineClipZone::edgeLeftSlip:TimelineClipZone::edgeRightSlip),
+                    "compact edge consistently uses third bracket from bottom");
+        }
+        require(resolveTimelineCursorRole({TimelineClipZone::bottomCutRail,false,true})==TimelineCursorRole::glue,
+                "Shift immediately switches cut rail to Glue");
+        require(resolveTimelineCursorRole({TimelineClipZone::bottomCutRail,false,false})==TimelineCursorRole::cut,
+                "release Shift restores scissors");
 
         // Verifica del Principio Canonico del Tratteggio: canAutomationPointMoveHorizontally
         require (! canAutomationPointMoveHorizontally (AutomationBoundaryPolicy::pinnedEndpoints, 0, 3),

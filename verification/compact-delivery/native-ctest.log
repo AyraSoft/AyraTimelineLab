@@ -1,0 +1,113 @@
+Internal ctest changing into directory: /mnt/data/build-app
+UpdateCTestConfiguration  from :/mnt/data/build-app/DartConfiguration.tcl
+Parse Config file:/mnt/data/build-app/DartConfiguration.tcl
+UpdateCTestConfiguration  from :/mnt/data/build-app/DartConfiguration.tcl
+Parse Config file:/mnt/data/build-app/DartConfiguration.tcl
+Test project /mnt/data/build-app
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 1
+      Start  1: height_presets
+
+1: Test command: /mnt/data/build-app/ayra_height_preset_tests
+1: Working Directory: /mnt/data/build-app
+1: Test timeout computed to be: 1500
+1: PASS shared presentation-height levels
+ 1/11 Test  #1: height_presets ...................   Passed    0.00 sec
+test 2
+      Start  2: event_row_layout
+
+2: Test command: /mnt/data/build-app/ayra_event_layout_tests
+2: Working Directory: /mnt/data/build-app
+2: Test timeout computed to be: 1500
+2: PASS 37797 actual event-row layout assertions
+ 2/11 Test  #2: event_row_layout .................   Passed    0.02 sec
+test 3
+      Start  3: core_regressions
+
+3: Test command: /mnt/data/build-app/ayra_lab_tests
+3: Working Directory: /mnt/data/build-app
+3: Test timeout computed to be: 1500
+3: PASS: 208 core assertions
+ 3/11 Test  #3: core_regressions .................   Passed    0.00 sec
+test 4
+      Start  4: timeline_panel_contracts
+
+4: Test command: /mnt/data/build-app/ayra_timeline_panel_tests
+4: Working Directory: /mnt/data/build-app
+4: Test timeout computed to be: 1500
+4: PASS 956 checks (presentation only; no native GUI claim)
+ 4/11 Test  #4: timeline_panel_contracts .........   Passed    0.09 sec
+test 5
+      Start  5: timeline_fixture_transactions
+
+5: Test command: /mnt/data/build-app/ayra_panel_fixture_tests
+5: Working Directory: /mnt/data/build-app
+5: Test timeout computed to be: 1500
+5: PASS 154 fixture/transaction checks
+ 5/11 Test  #5: timeline_fixture_transactions ....   Passed    0.06 sec
+test 6
+      Start  6: fixture_sources
+
+6: Test command: /opt/pyvenv/bin/python3 "/mnt/data/AyraTimelineLab/tools/generate.py" "--check"
+6: Working Directory: /mnt/data/build-app
+6: Test timeout computed to be: 1500
+6: Generated sources: OK
+ 6/11 Test  #6: fixture_sources ..................   Passed    0.72 sec
+test 7
+      Start  7: codec_regressions
+
+7: Test command: /mnt/data/build-app/ayra_lab_codec_tests
+7: Working Directory: /mnt/data/build-app
+7: Test timeout computed to be: 1500
+7: JUCE v8.0.12
+7: PASS: 14 JUCE codec assertions
+ 7/11 Test  #7: codec_regressions ................   Passed    0.03 sec
+test 8
+      Start  8: clip_component_regressions
+
+8: Test command: /mnt/data/build-app/ayra_lab_clip_tests
+8: Working Directory: /mnt/data/build-app
+8: Test timeout computed to be: 1500
+8: JUCE v8.0.12
+8: PASS: 1491 clip component assertions
+ 8/11 Test  #8: clip_component_regressions .......   Passed    0.17 sec
+test 9
+      Start  9: native_panel_interactions
+
+9: Test command: /mnt/data/build-app/ayra_panel_native_tests
+9: Working Directory: /mnt/data/build-app
+9: Test timeout computed to be: 1500
+9: JUCE v8.0.12
+9: PASS 604 native component assertions; 10000 logical lanes; maximum resident rows 15
+ 9/11 Test  #9: native_panel_interactions ........   Passed   10.37 sec
+test 10
+      Start 10: identity_visual_contracts
+
+10: Test command: /mnt/data/build-app/ayra_identity_tests "/mnt/data/build-app/identity-evidence"
+10: Working Directory: /mnt/data/build-app
+10: Test timeout computed to be: 1500
+10: JUCE v8.0.12
+10: PASS 252671 frosted lens layout/render/hover assertions; native JUCE painter fixtures
+10/11 Test #10: identity_visual_contracts ........   Passed   12.90 sec
+test 11
+      Start 11: real_canvas_interactions
+
+11: Test command: /mnt/data/build-app/ayra_canvas_interaction_tests "/mnt/data/build-app/canvas-evidence"
+11: Working Directory: /mnt/data/build-app
+11: Test timeout computed to be: 1500
+11: JUCE v8.0.12
+11: Canvas audio
+11: Canvas midi
+11: Canvas line
+11: Canvas image
+11: PASS 4221 real canvas geometry, input, grouping, source-anchor and rendering contracts
+11/11 Test #11: real_canvas_interactions .........   Passed    7.28 sec
+
+100% tests passed, 0 tests failed out of 11
+
+Total Test time (real) =  31.65 sec

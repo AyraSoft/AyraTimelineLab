@@ -3,6 +3,7 @@
     Rebuild on event/viewport changes, never in paint or from current row height. */
 #pragma once
 #include <algorithm>
+#include "../../../modules/ayra_timeline_panel/TimelineVisualMetrics.h"
 #include <cmath>
 #include <cstddef>
 #include <functional>
@@ -11,13 +12,14 @@
 
 namespace ayra::lab::clips::keyframe_lane_layout
 {
-inline constexpr float padY=3.0f,pillHeight=18.0f,rowGap=4.0f,spanRowGap=12.0f;
+namespace metrics = ayra::timeline_panel::visual_metrics;
+inline constexpr float padY=metrics::eventPadding,pillHeight=metrics::eventBody,rowGap=4.0f,spanRowGap=12.0f;
 // Retained for legacy callers; new placement has no six-row collision clamp.
 inline constexpr int maxRows=6;
 inline int contentHeight(int rows,bool span) noexcept
 {
     rows=std::max(1,rows);
-    return static_cast<int>(2*padY+rows*pillHeight+(rows-1)*(span?spanRowGap:rowGap)+(span?8:0));
+    return static_cast<int>(2*padY+rows*pillHeight+(rows-1)*(span?spanRowGap:rowGap)+(span?metrics::cutRailExtent:0));
 }
 struct VisualInterval { std::size_t source=0; double left=0,right=0; };
 struct RowPlacement { std::size_t source=0;int row=0; };

@@ -2,9 +2,10 @@
     Keep these levels shared between the viewport and the individual canvases. */
 #pragma once
 #include <cmath>
+#include "TimelineVisualMetrics.h"
 namespace ayra::timeline_panel::height_presets
 {
-inline constexpr int compact = 24;  // same as a single row of point events
+inline constexpr int compact = visual_metrics::spanRow; // event body AND cut rail
 inline constexpr int midiEditor = 256;
 inline constexpr int expanded = 400;
 [[nodiscard]] constexpr int next (float current, bool midi) noexcept
