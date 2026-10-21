@@ -115,6 +115,15 @@ class AudioClipCanvas final : public juce::Component,
                               public clips::AudioClipPresentationProvider {
 public:
   CanvasViewportBinding panelView;
+  // Only the clip body/title is delegated to lane-height zoom; tools retain
+  // their own double-click semantics (warp, envelope, cut, edges, notes).
+  bool containsPanelZoomTargetAt(juce::Point<float> point) const {
+    const auto hit=hitTestZones(point);
+    return hit.clip != nullptr &&
+        (hit.zone == TimelineClipZone::clipBody ||
+         hit.zone == TimelineClipZone::clipTitleMove);
+  }
+
 
   // The identity lens uses the exact clip/edit hit regions (including rails
   // and handles), not an approximate lane-wide temporal rectangle.
@@ -2533,12 +2542,15 @@ private:
       return;
 
     const auto hit = hitTestZones(e.position);
+    // The panel owns vertical zoom for free body/title double-clicks.
+    if (panelView.enabled && containsPanelZoomTargetAt(e.position))
+      return;
 
     // 0. Doppio click sul titolo o header della clip (o intera clip se
     // compressa):
     //    cicla le 3 altezze canoniche condivise (96 -> 256 -> 400 -> 96)
     //    tenendo conto dello zoom verticale
-    if (hit.clip != nullptr &&
+    if (!panelView.enabled && hit.clip != nullptr &&
         clip_height_law::isHeaderAreaOrClosedClip(
             hit.zone, hit.bounds.getHeight(), hit.markerIdx)) {
       const int modelHeight = clip_height_law::nextModelHeight(
