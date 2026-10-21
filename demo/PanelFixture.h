@@ -91,31 +91,30 @@ inline Session makePanelFixture()
     using S=panel::Stream; using V=panel::VisualKind;
     m->lanes={
         {"range","globals",{},"Range",S::global,V::span,28,24,1200,true},
-        {"tempo","globals",{},"Tempo",S::global,V::continuous,96,48,1200,true},
+        {"tempo","globals",{},"Tempo",S::global,V::continuous,96,24,1200,true},
         {"markers","globals",{},"Markers",S::global,V::point,24,24,1200,true},
         {"timesig","globals",{},"Metrica",S::global,V::point,24,24,1200,true},
         {"counter","globals",{},"Counter",S::global,V::point,24,24,1200,true},
         {"backing.audio","backing","backing.bus","Audio",S::audio,V::audio},
         {"voice.audio","voice","voice.audio-bus","Audio",S::audio,V::audio},
-        {"voice.midi","voice","voice.midi-bus","MIDI",S::midi,V::midi,256,96,1200},
+        {"voice.midi","voice","voice.midi-bus","MIDI",S::midi,V::midi,256,24,1200},
         {"voice.image","voice","voice.image-bus","Image",S::image,V::image},
-        {"keys.midi","keys","keys.midi-bus","MIDI",S::midi,V::midi,96,96,1200},
+        {"keys.midi","keys","keys.midi-bus","MIDI",S::midi,V::midi,96,24,1200},
         {"keys.audio","keys","keys.audio-bus","Audio",S::audio,V::audio},
         {"keys.automation","keys","keys.param-bus","Parameter",S::parameter,V::line},
-        {"mix-a.automation","mix-a","mix-a.param-bus","Automation",S::parameter,V::continuous,96,48,1200},
+        {"mix-a.automation","mix-a","mix-a.param-bus","Automation",S::parameter,V::continuous,96,24,1200},
         {"guitar.audio","guitar","guitar.audio-bus","Audio",S::audio,V::audio},
-        {"guitar.midi","guitar","guitar.midi-bus","MIDI",S::midi,V::midi,400,96,1200},
+        {"guitar.midi","guitar","guitar.midi-bus","MIDI",S::midi,V::midi,400,24,1200},
         {"lights.dmx","lights","lights.dmx-bus","DMX",S::dmx,V::span,96,48,1200},
         {"lights.osc","lights","lights.osc-bus","OSC",S::osc,V::point,64,48,1200},
         {"lights.text","lights","lights.text-bus","Text draft",S::text,V::span,64,48,1200},
         {"song-main.audio","song-main","main.audio-bus","Audio",S::audio,V::audio}
     };
     for(auto& lane:m->lanes) {
-        // Every manual visual may fold to the same 24px single-event lane.
-        if(lane.heightPolicy==panel::HeightPolicy::manual)lane.minimumHeight=32;
+        lane.minimumHeight=panel::height_presets::compact;
         if(lane.visual==V::point||lane.visual==V::span) {
             lane.heightPolicy=panel::HeightPolicy::automatic;
-            lane.initialHeight=lane.minimumHeight=lane.visual==V::point?24:32;
+            lane.initialHeight=lane.minimumHeight=lane.visual==V::point?panel::visual_metrics::pointRow:panel::visual_metrics::spanRow;
             lane.maximumHeight=10000;
         }
         if(lane.stream!=S::global){lane.inputMeterCount=2;lane.outputMeterCount=2;}
@@ -313,9 +312,38 @@ public:
                 if (unique.size()<2 || (kind==panel::RelationKind::temporalGroup ? lanes.size()!=1 : lanes.size()<2))
                     return panel::Result::fail("Invalid relation scope");
                 panel::Id id;
-                do { id="relation-"+std::to_string(++nextRelation); }
-                while (std::any_of(meta->relations.begin(),meta->relations.end(),[&](const auto& r){return r.id==id;}));
-                meta->relations.push_back({id,kind,c.events});
+                if(kind==panel::RelationKind::temporalGroup) {
+                    // Union existing horizontal groups; leave every vertical link intact.
+                    std::set<panel::EventRef> members=unique;
+                    bool grew=true;
+                    while(grew) {
+                        grew=false;
+                        for(const auto& relation:meta->relations)
+                            if(relation.kind==kind && std::any_of(relation.members.begin(),relation.members.end(),
+                                [&](const auto& ref){return members.contains(ref);})) {
+                                if(id.empty())id=relation.id;
+                                for(const auto& ref:relation.members)grew=members.insert(ref).second||grew;
+                            }
+                    }
+                    for(const auto& ref:members)
+                        if(ref.lane!=*lanes.begin() || !fixtureClip(next,ref) || meta->locked.contains(ref))
+                            return panel::Result::fail("Invalid or locked temporal group member");
+                    const auto identical=std::find_if(meta->relations.begin(),meta->relations.end(),[&](const auto& rel){
+                        return rel.kind==kind && std::set<panel::EventRef>(rel.members.begin(),rel.members.end())==members;});
+                    if(identical!=meta->relations.end())return {}; // idempotent, no Undo entry
+                    std::erase_if(meta->relations,[&](const auto& relation){
+                        return relation.kind==kind && std::any_of(relation.members.begin(),relation.members.end(),
+                            [&](const auto& ref){return members.contains(ref);});});
+                    if(id.empty()) {
+                        do {id="relation-"+std::to_string(++nextRelation);}
+                        while(std::any_of(meta->relations.begin(),meta->relations.end(),[&](const auto& rel){return rel.id==id;}));
+                    }
+                    meta->relations.push_back({id,kind,{members.begin(),members.end()}});
+                } else {
+                    do { id="relation-"+std::to_string(++nextRelation); }
+                    while (std::any_of(meta->relations.begin(),meta->relations.end(),[&](const auto& rel){return rel.id==id;}));
+                    meta->relations.push_back({id,kind,c.events});
+                }
             }
             else if (c.kind==K::dissolveGroup || c.kind==K::unlinkClips)
             {

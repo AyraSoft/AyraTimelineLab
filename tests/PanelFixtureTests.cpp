@@ -1,5 +1,6 @@
 #include "../demo/PanelFixture.h"
 #include "../demo/PanelClipWindow.h"
+#include "../modules/ayra_timeline_panel/TimelineGrouping.h"
 #include <cstdlib>
 #include <iostream>
 using namespace ayra::lab;
@@ -91,6 +92,54 @@ void relations()
     CHECK(store.commit(candidate,"Detached move"));CHECK(start(store,"voice.midi","voice.midi.one")==4);
     CHECK(start(store,"voice.audio","voice.audio.one")==3);
 }
+void groupingTargetsAndUnion()
+{
+    Store store(makePanelFixture());PanelFixtureHost host(store);
+    auto snapshot=host.snapshot();std::vector<panel::EventRef> refs;
+    const std::string lane="guitar.audio",one=lane+".one",two=lane+".two",three=lane+".three";
+    CHECK(panel::temporalGroupTargets(snapshot,lane,one,{},false,refs));
+    CHECK(refs==std::vector<panel::EventRef>({{lane,one},{lane,two}}));
+    CHECK(!panel::temporalGroupTargets(snapshot,lane,three,{},false,refs));
+    CHECK(!panel::temporalGroupTargets(snapshot,lane,"missing",{},true,refs));
+    CHECK(panel::temporalGroupTargets(snapshot,lane,two,{{lane,one},{lane,three},{"voice.midi","voice.midi.one"}},false,refs));
+    CHECK(refs==std::vector<panel::EventRef>({{lane,one},{lane,three}}));
+    CHECK(panel::temporalGroupTargets(snapshot,lane,one,{},true,refs));CHECK(refs.size()==3);
+    // Group resolution is document-wide, even for clips outside the visible window.
+    std::reverse(snapshot.events.begin(),snapshot.events.end());
+    CHECK(panel::temporalGroupTargets(snapshot,lane,one,{},true,refs));CHECK(refs.front().clip==one&&refs.back().clip==three);
+    const auto verticalBefore=std::find_if(snapshot.relations.begin(),snapshot.relations.end(),[](const auto& rel){return rel.kind==panel::RelationKind::clipLink;})->members;
+    auto group=command(host,panel::CommandKind::temporalGroup);group.events={{lane,one},{lane,two}};
+    CHECK(host.apply(group));const auto afterPair=store.state();
+    group=command(host,panel::CommandKind::temporalGroup);group.events={{lane,two},{lane,three}};
+    CHECK(host.apply(group));
+    const auto& rels=store.state().panelMetadata->relations;
+    const auto merged=std::find_if(rels.begin(),rels.end(),[&](const auto& rel){return rel.kind==panel::RelationKind::temporalGroup&&rel.members[0].lane==lane;});
+    CHECK(merged!=rels.end()&&merged->members.size()==3);CHECK(panel::validate(host.snapshot()));
+    CHECK(std::find_if(rels.begin(),rels.end(),[](const auto& rel){return rel.kind==panel::RelationKind::clipLink;})->members==verticalBefore);
+    // A repeat does not write a redundant relation or create another undo item.
+    const auto revision=host.snapshot().revision;
+    group=command(host,panel::CommandKind::temporalGroup);group.events=refs;CHECK(host.apply(group));
+    CHECK(host.snapshot().revision==revision);CHECK(store.undo());CHECK(store.state()==afterPair);
+    CHECK(store.redo());
+    // Lock any member pulled into the union, not just explicitly selected clips.
+    auto candidate=store.state();auto meta=std::make_shared<PanelFixtureMetadata>(*candidate.panelMetadata);
+    meta->locked.insert({lane,three});candidate.panelMetadata=meta;CHECK(store.commit(candidate,"Lock group member"));
+    const auto lockedState=store.state();group=command(host,panel::CommandKind::temporalGroup);group.events={{lane,one},{lane,two}};
+    CHECK(!host.apply(group));CHECK(store.state()==lockedState);
+    snapshot=host.snapshot();CHECK(!panel::temporalGroupTargets(snapshot,lane,one,{},true,refs));
+    CHECK(store.undo());CHECK(store.undo());CHECK(store.undo());
+    CHECK(!store.canUndo()); // group creation + merge were each exactly one transaction
+    // Explicit host minimums are not bypassed by the compact presentation profile.
+    panel::Controller controller;snapshot=host.snapshot();
+    for(auto& l:snapshot.lanes)if(l.id==lane)l.minimumHeight=80;
+    CHECK(controller.adopt(snapshot));CHECK(controller.setHeight(lane,32));CHECK(controller.height(lane)==80);
+    snapshot=controller.snapshot();++snapshot.revision;
+    for(auto& l:snapshot.lanes)if(l.id==lane){l.maximumHeight=200;l.initialHeight=176;}
+    CHECK(controller.adopt(snapshot));
+    CHECK(controller.cycleHeight(lane));CHECK(controller.height(lane)==200);
+    CHECK(controller.cycleHeight(lane));CHECK(controller.height(lane)==80);
+}
+
 void failuresAndLifetime()
 {
     Store store(makePanelFixture());int calls=0;store.changed=[&]{++calls;};
@@ -129,4 +178,4 @@ void visibleClipProjection()
     source.clips.erase(source.clips.begin());window.update(source,2);CHECK(!window.canonicalIds->contains("0"));
 }
 }
-int main(){visibleClipProjection();controls();relations();failuresAndLifetime();std::cout<<"PASS "<<count<<" fixture/transaction checks\n";}
+int main(){groupingTargetsAndUnion();visibleClipProjection();controls();relations();failuresAndLifetime();std::cout<<"PASS "<<count<<" fixture/transaction checks\n";}

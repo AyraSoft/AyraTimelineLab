@@ -79,8 +79,7 @@ struct LaneCanvas
     // Canvas-local, side-effect-free query using the SAME clip/editor geometry
     // as input. A component's rectangular hitTest or a lane time interval is
     // not proof of a clip here. Missing callback = no hover suppression.
-    std::function<bool(juce::Point<float>)> containsClipAt;
-    std::function<bool(juce::Point<float>)> containsZoomTargetAt; // compatibility fallback
+    std::function<bool(juce::Point<float>)> containsClipAt; // compatibility fallback
     // All real content targets: clips, points, spans, curves and handles. This
     // must use the canvas input geometry, not its full rectangular hitTest.
     std::function<bool(juce::Point<float>)> containsEditableAt;
@@ -325,7 +324,7 @@ private:
             void mouseDown(const juce::MouseEvent& e) override { changed(e,true); }
             void mouseDrag(const juce::MouseEvent& e) override { changed(e,true); }
             void mouseUp(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
-            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.zoomOnCanvasDoubleClick(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
+            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
             void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails&) override { changed(e); }
         private:
             LaneRow& owner;
@@ -519,8 +518,11 @@ private:
             }
         }
         void mouseMove(const juce::MouseEvent& e)override
-        {setMouseCursor(geometry.isAccent(e.x,e.y)?juce::MouseCursor::DraggingHandCursor:
-            geometry.resizeHit.contains(e.x,e.y)?juce::MouseCursor::UpDownResizeCursor:juce::MouseCursor::NormalCursor);}
+        {
+            if(geometry.isAccent(e.x,e.y))setMouseCursor(juce::MouseCursor::DraggingHandCursor);
+            else setMouseCursor(geometry.resizeHit.contains(e.x,e.y)
+                ? juce::MouseCursor::UpDownResizeCursor:juce::MouseCursor::NormalCursor);
+        }
         void mouseDrag(const juce::MouseEvent& e)override
         {
             if(resizing){host.controller.updateResize(e.getScreenY()-resizeStart);host.refresh();return;}
@@ -538,30 +540,20 @@ private:
                 dragging=false;host.dropLane.clear();host.refresh();if(host.onSelectionChanged)host.onSelectionChanged();
             }
         }
-        void zoomOnCanvasDoubleClick(const juce::MouseEvent& e)
-        {
-            if(!e.mods.isLeftButtonDown()||!canvas.containsZoomTargetAt||!canvas.component)return;
-            if(e.eventComponent!=canvas.component.get())return;
-            if(canvas.containsZoomTargetAt(e.getEventRelativeTo(canvas.component.get()).position))toggleCompactHeight();
-        }
-        void toggleCompactHeight()
-        {
-            const auto* lane=host.controller.lane(row.lane);
-            if(!lane||lane->heightPolicy!=HeightPolicy::manual)return;
-            const int minimum=host.controller.minimumHeight(*lane);
-            const int current=host.controller.height(row.lane);
-            if(lane->visual==VisualKind::midi){
-                const int notes=juce::jmax(minimum+1,96);
-                const int velocities=juce::jmax(notes+1,256);
-                host.controller.setHeight(row.lane,current<notes-2?notes:current<velocities-2?velocities:minimum);
-            }else{
-                const int expanded=juce::jmax(lane->initialHeight,minimum+24);
-                host.controller.setHeight(row.lane,current<=minimum+2?expanded:minimum);
-            }
-            host.refresh();
-        }
         void mouseDoubleClick(const juce::MouseEvent& e)override
-        {if(geometry.isAccent(e.x,e.y)||geometry.resizeHit.contains(e.x,e.y))toggleCompactHeight();}
+        {
+            if(!e.mods.isLeftButtonDown())return;
+            // Accent owns vertical preview cycling, including continuous lines.
+            // Other double clicks remain with the real canvas/editor target.
+            if(geometry.isAccent(e.x,e.y)){
+                accentDown=false;dragging=false;deferredSelection=false;host.dropLane.clear();
+                if(host.controller.cycleHeight(row.lane))host.refresh();
+                return;
+            }
+            if(geometry.resizeHit.contains(e.x,e.y)){
+                if(host.controller.cycleHeight(row.lane))host.refresh();
+            }
+        }
         bool keyPressed(const juce::KeyPress& key)override
         {if(key==juce::KeyPress::escapeKey&&resizing){resizing=false;host.controller.endResize(false);host.refresh();return true;}return false;}
     private:
@@ -693,12 +685,8 @@ private:
                 titleExpanded=expand;rebuildIdentityGeometry();
                 inside=withinView&&identityLayout.backdrop.toFloat().contains(p);
             }
-            // Passive service-lane titles must not linger under the pointer.
-            if(inside&&!canRenameTitle()&&identityLayout.titleHit.toFloat().contains(p)){
-                identityHover.update(true,true,false,juce::Time::getMillisecondCounterHiRes(),true);
-                identitySurface.setVisible(false);host.scheduleIdentity(row.key,{});return;
-            }
             const bool protectedTarget=onNavigation||onTitle;
+            const bool passiveTitle=inside&&!canRenameTitle()&&identityLayout.titleHit.toFloat().contains(p);
             bool editable=false;
             if(inside&&!protectedTarget&&!identityHover.hidden()&&canvas.component) {
                 const auto local=canvas.component->getLocalPoint(this,p);
@@ -708,7 +696,9 @@ private:
                     else if(canvas.containsClipAt)editable=canvas.containsClipAt(local);
                 }
             }
-            if(identityHover.update(inside,editable,protectedTarget,juce::Time::getMillisecondCounterHiRes(),editing)) {
+            if(identityHover.update(inside,editable||passiveTitle,protectedTarget,
+                                    juce::Time::getMillisecondCounterHiRes(),
+                                    editing || passiveTitle)) {
                 underlayDirty=true;repaint(identityLayout.backdrop);
             }
             identitySurface.setVisible(!identityHover.hidden());

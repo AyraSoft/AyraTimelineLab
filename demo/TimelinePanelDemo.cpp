@@ -5,6 +5,7 @@
 #include "../app/LabComponent.cpp"
 #include "TimelinePanelDemo.h"
 #include "PanelFixture.h"
+#include "../modules/ayra_timeline_panel/TimelineGrouping.h"
 #include "PanelClipWindow.h"
 #include "TimelineIdentityArtwork.h"
 #include "TimelineLaneControls.h"
@@ -50,6 +51,10 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
                ||requires(const Canvas& c){c.containsPanelClipAt(juce::Point<float>{});},
                   "Every canvas must expose its real editable-content hit geometry");
     auto* raw=component.get();const auto key=std::make_pair(sourceLane.id,sourceLane.visual);
+    raw->panelView.cycleHeight=[&legacy, id=sourceLane.id]{if(legacy.onPanelHeightCycle)legacy.onPanelHeightCycle(id);};
+    raw->panelView.prepareTemporalGroup=[&legacy,id=sourceLane.id](const std::string& clip){
+        return legacy.onPrepareTemporalGroup?legacy.onPrepareTemporalGroup(id,clip):std::function<void(bool)>{};
+    };
     if(const auto it=states.find(key);it!=states.end())raw->restorePanelState(it->second);
     panel::LaneCanvas result;
     if constexpr(requires {raw->containsPanelEditableAt(juce::Point<float>{});})
@@ -61,7 +66,11 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
     if constexpr(requires {raw->onPanelContentChanged;})
         result.setContentChangeListener=[raw](std::function<void()> listener){raw->onPanelContentChanged=std::move(listener);};
     result.saveState=[raw,&states,key]{states[key]=raw->capturePanelState();};
-    result.hasInteraction=[raw]{return raw->isMouseButtonDown(true)||raw->hasKeyboardFocus(true);};
+    result.hasInteraction=[raw]{
+        bool pending=false;
+        if constexpr(requires{raw->hasPendingPanelGroupGesture();})pending=raw->hasPendingPanelGroupGesture();
+        return pending||raw->isMouseButtonDown(true)||raw->hasKeyboardFocus(true);
+    };
     if constexpr(requires {raw->panelEventTimes();})result.eventTimes=[raw]{return raw->panelEventTimes();};
     auto window=std::make_shared<PanelClipWindow>();
     result.bind=[raw,&legacy,window](const panel::Lane& lane,const panel::CanvasFrame& frame)
@@ -82,12 +91,11 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
             }
         }
     };
-    if constexpr(requires {raw->containsPanelZoomTargetAt(juce::Point<float>{});})
-        result.containsZoomTargetAt=[raw](juce::Point<float> point){return raw->containsPanelZoomTargetAt(point);};
     result.component=std::move(component);return result;
 }
 class TimelinePanelDemo final:public juce::Component,private juce::AsyncUpdater
 {
+    friend struct CanvasContractAccess;
 public:
     TimelinePanelDemo()
     {
@@ -95,6 +103,7 @@ public:
         // Retain the old host API, not its old row model or per-change layout work.
         legacy.store()=Store(makePanelFixture());
         legacy.store().changed=nullptr;
+        legacy.onPanelHeightCycle=[this](const std::string& id){if(controller.cycleHeight(id))surface->refresh();};
         bridge=std::make_unique<PanelFixtureHost>(legacy.store());
         bridge->onChanged=[this]{triggerAsyncUpdate();};
         bridge->onOpenOwner=[this](const auto& id){openOwner(id);};
@@ -119,6 +128,27 @@ public:
         surface->onSeek=[this](double){updateStatus();}; // No transport or audio engine in this showcase.
         addAndMakeVisible(*surface);setLookAndFeel(&legacy.look());
         legacy.onTimelineContextMenuRequested=[this](const clips::TimelinePointerContext& c){clipMenu(c);};
+        legacy.onPrepareTemporalGroup=[this](const std::string& lane,const std::string& clip){
+            const auto snapshot=bridge->snapshot();
+            auto selected=selectedEvents;
+            return std::function<void(bool)>{[safe=juce::Component::SafePointer<TimelinePanelDemo>(this),
+                lane,clip,selected=std::move(selected),session=snapshot.session,revision=snapshot.revision](bool all){
+                if(!safe)return;
+                const auto current=safe->bridge->snapshot();
+                if(current.session!=session || current.revision!=revision) {
+                    safe->report(panel::Result::fail("Documento cambiato durante il gesto Glue: operazione annullata"));return;
+                }
+                std::vector<panel::EventRef> targets;
+                auto result=panel::temporalGroupTargets(current,lane,clip,selected,all,targets);
+                if(result) {
+                    panel::Command c;c.kind=panel::CommandKind::temporalGroup;
+                    c.session=session;c.revision=revision;c.events=targets;
+                    result=safe->bridge->apply(c);
+                    if(result){safe->selectedEvents=std::move(targets);safe->message="Gruppo orizzontale creato (Undo disponibile)";}
+                }
+                safe->report(result);
+            }};
+        };
         addButton(structured,[this]{changeMode(panel::Mode::structured);});
         addButton(free,[this]{changeMode(panel::Mode::freeLanes);});
         addButton(groupLanes,[this]{groupSelectedLanes();});
@@ -151,7 +181,7 @@ public:
     }
     ~TimelinePanelDemo() override
     {
-        cancelPendingUpdate();legacy.onTimelineContextMenuRequested=nullptr;
+        cancelPendingUpdate();legacy.onTimelineContextMenuRequested=nullptr;legacy.onPrepareTemporalGroup=nullptr;legacy.onPanelHeightCycle={};
         surface.reset();bridge.reset();setLookAndFeel(nullptr);
     }
     void resized()override

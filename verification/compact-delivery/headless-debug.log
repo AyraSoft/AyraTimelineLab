@@ -1,0 +1,75 @@
+[0/1] Re-running CMake...
+-- Ayra visual source: ayra_ui snapshot (not live Multiverse)
+-- Configuring done (4.5s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/build-core
+[1/7] Building CXX object CMakeFiles/ayra_height_preset_tests.dir/tests/HeightPresetTests.cpp.o
+[2/7] Building CXX object CMakeFiles/ayra_timeline_panel_tests.dir/tests/TimelinePanelTests.cpp.o
+[3/7] Linking CXX executable ayra_height_preset_tests
+[4/7] Linking CXX executable ayra_timeline_panel_tests
+[5/7] Building CXX object CMakeFiles/ayra_panel_fixture_tests.dir/tests/PanelFixtureTests.cpp.o
+[6/7] Linking CXX executable ayra_panel_fixture_tests
+Internal ctest changing into directory: /mnt/data/build-core
+UpdateCTestConfiguration  from :/mnt/data/build-core/DartConfiguration.tcl
+Parse Config file:/mnt/data/build-core/DartConfiguration.tcl
+UpdateCTestConfiguration  from :/mnt/data/build-core/DartConfiguration.tcl
+Parse Config file:/mnt/data/build-core/DartConfiguration.tcl
+Test project /mnt/data/build-core
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 1
+    Start 1: height_presets
+
+1: Test command: /mnt/data/build-core/ayra_height_preset_tests
+1: Working Directory: /mnt/data/build-core
+1: Test timeout computed to be: 1500
+1: PASS shared presentation-height levels
+1/6 Test #1: height_presets ...................   Passed    0.00 sec
+test 2
+    Start 2: event_row_layout
+
+2: Test command: /mnt/data/build-core/ayra_event_layout_tests
+2: Working Directory: /mnt/data/build-core
+2: Test timeout computed to be: 1500
+2: PASS 37797 actual event-row layout assertions
+2/6 Test #2: event_row_layout .................   Passed    0.02 sec
+test 3
+    Start 3: core_regressions
+
+3: Test command: /mnt/data/build-core/ayra_lab_tests
+3: Working Directory: /mnt/data/build-core
+3: Test timeout computed to be: 1500
+3: PASS: 208 core assertions
+3/6 Test #3: core_regressions .................   Passed    0.01 sec
+test 4
+    Start 4: timeline_panel_contracts
+
+4: Test command: /mnt/data/build-core/ayra_timeline_panel_tests
+4: Working Directory: /mnt/data/build-core
+4: Test timeout computed to be: 1500
+4: PASS 956 checks (presentation only; no native GUI claim)
+4/6 Test #4: timeline_panel_contracts .........   Passed    0.08 sec
+test 5
+    Start 5: timeline_fixture_transactions
+
+5: Test command: /mnt/data/build-core/ayra_panel_fixture_tests
+5: Working Directory: /mnt/data/build-core
+5: Test timeout computed to be: 1500
+5: PASS 154 fixture/transaction checks
+5/6 Test #5: timeline_fixture_transactions ....   Passed    0.07 sec
+test 6
+    Start 6: fixture_sources
+
+6: Test command: /opt/pyvenv/bin/python3 "/mnt/data/AyraTimelineLab/tools/generate.py" "--check"
+6: Working Directory: /mnt/data/build-core
+6: Test timeout computed to be: 1500
+6: Generated sources: OK
+6/6 Test #6: fixture_sources ..................   Passed    0.71 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Total Test time (real) =   0.90 sec

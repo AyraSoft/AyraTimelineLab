@@ -1,0 +1,2 @@
+PASS real native application launch (1480x1040), screenshot and WM_DELETE_WINDOW shutdown; exit 0, no JUCE assertions/leaks.
+JUCE v8.0.12

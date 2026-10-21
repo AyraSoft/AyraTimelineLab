@@ -1,5 +1,6 @@
 #pragma once
 #include "../keyframe/ayra_KeyframeRowLayout.h"
+#include "../../../modules/ayra_timeline_panel/TimelineHeightPresets.h"
 
 namespace ayra::lab::clips
 {
@@ -63,6 +64,7 @@ enum class TimelineCursorRole
     verticalResize,
     twoDimensionalResize,
     cut,
+    glue,
     erase
 };
 
@@ -90,8 +92,8 @@ struct TimelineCursorContext
         case TimelineClipZone::warpMarker:
         case TimelineClipZone::midiOverlayPill:
         case TimelineClipZone::midiProgramChangeFlag: return TimelineCursorRole::point;
-        case TimelineClipZone::bottomCutRail:
-        case TimelineClipZone::keyframeCutRail:        return TimelineCursorRole::cut;
+        case TimelineClipZone::bottomCutRail:         return context.shiftDown ? TimelineCursorRole::glue : TimelineCursorRole::cut;
+        case TimelineClipZone::keyframeCutRail:       return TimelineCursorRole::cut;
         case TimelineClipZone::gainEnvelopeLine:
         case TimelineClipZone::gainHandle:
         case TimelineClipZone::midiPitchScrollbar:
@@ -128,12 +130,47 @@ struct TimelineCursorContext
     }
 }
 
+/** Custom native handles must die before JUCE's window-system shutdown, not
+    in C++ static destruction (which would recreate X11 on Linux). */
+template<TimelineCursorRole Role>
+class TimelineCursorCache final : private juce::DeletedAtShutdown
+{
+public:
+    template<class Factory> static juce::MouseCursor get(Factory&& factory)
+    {
+        if(instance==nullptr) {
+            // Build the handle first so its native provider precedes this cache
+            // in JUCE's reverse-order shutdown registry.
+            auto cursor=factory();
+            instance=new TimelineCursorCache(std::move(cursor));
+        }
+        return instance->cursor;
+    }
+private:
+    explicit TimelineCursorCache(juce::MouseCursor value):cursor(std::move(value)){}
+    ~TimelineCursorCache()override {instance=nullptr;}
+    inline static TimelineCursorCache* instance=nullptr;
+    juce::MouseCursor cursor;
+};
+
 [[nodiscard]] inline juce::MouseCursor timelineMouseCursor (
     const TimelineCursorRole role)
 {
+    if(role==TimelineCursorRole::glue) {
+        const auto cursor=TimelineCursorCache<TimelineCursorRole::glue>::get([] {
+            juce::Image image(juce::Image::ARGB,24,24,true);juce::Graphics g(image);
+            juce::Path bottle;bottle.addRoundedRectangle(6.0f,9.0f,12.0f,11.0f,2.0f);
+            bottle.addRectangle(9.0f,6.0f,6.0f,3.0f);
+            bottle.startNewSubPath(10.0f,6.0f);bottle.lineTo(12.0f,1.0f);bottle.lineTo(14.0f,6.0f);bottle.closeSubPath();
+            g.setColour(juce::Colours::black.withAlpha(0.90f));g.strokePath(bottle,juce::PathStrokeType(3.5f));
+            g.setColour(juce::Colours::white);g.fillPath(bottle);
+            g.setColour(juce::Colour(0xff2d677c));g.fillRoundedRectangle(8.0f,12.0f,8.0f,5.0f,1.0f);
+            return juce::MouseCursor(image,12,1);
+        });return cursor;
+    }
     if (role == TimelineCursorRole::cut || role == TimelineCursorRole::erase)
     {
-        static const juce::MouseCursor cutCursor = []
+        const auto cutCursor = TimelineCursorCache<TimelineCursorRole::cut>::get([]
         {
             juce::Image image (juce::Image::ARGB, 24, 24, true);
             juce::Graphics g (image);
@@ -146,8 +183,8 @@ struct TimelineCursorContext
             g.drawEllipse (2.0f, 1.5f, 7.0f, 7.0f, 1.5f);
             g.drawEllipse (15.0f, 1.5f, 7.0f, 7.0f, 1.5f);
             return juce::MouseCursor (image, 12, 12);
-        }();
-        static const juce::MouseCursor eraseCursor = []
+        });
+        const auto eraseCursor = TimelineCursorCache<TimelineCursorRole::erase>::get([]
         {
             juce::Image image (juce::Image::ARGB, 24, 24, true);
             juce::Graphics g (image);
@@ -161,7 +198,7 @@ struct TimelineCursorContext
             g.setColour (juce::Colours::white);
             g.strokePath (eraser, juce::PathStrokeType (2.0f));
             return juce::MouseCursor (image, 7, 17);
-        }();
+        });
         return role == TimelineCursorRole::cut ? cutCursor : eraseCursor;
     }
 
@@ -259,8 +296,12 @@ struct TimelineTimeAxisProjection
     - [0.25 .. 0.50]: Slip ("secondo trim", quello che prima era sopra)
     - [0.50 .. 0.75]: Trim ("primo trim", quello che prima era 2/4)
     - [0.75 .. 1.00]: Stretch / Warp (1/4 sotto) */
-[[nodiscard]] inline TimelineClipZone computeClipEdgeZone (const bool isLeft, const float relY) noexcept
+[[nodiscard]] inline TimelineClipZone computeClipEdgeZone (const bool isLeft, const float relY, const float laneHeight = 10000.0f) noexcept
 {
+    // Third bracket from the bottom: Slip, preserving the opposite source
+    // anchor. Use this same resolved zone for hover, cursor, drag and reset.
+    if(laneHeight < ayra::timeline_panel::visual_metrics::previousCompactLaneHeight)
+        return isLeft ? TimelineClipZone::edgeLeftSlip : TimelineClipZone::edgeRightSlip;
     if (relY <= 0.25f)
         return isLeft ? TimelineClipZone::edgeLeftLoop : TimelineClipZone::edgeRightLoop;
     if (relY <= 0.50f)
@@ -584,44 +625,27 @@ enum class ClipFeatureId : std::uint16_t
 
 namespace clip_height_law
 {
-    /** Altezze canoniche condivise da tutte le clip (Single Source of Truth).
-        Rappresentano la legge comune di dimensionamento verticale e Level of Detail (LOD):
-        - compact:  96 px (preview / compatta)
-        - medium:  256 px (editing principale / in-place)
-        - full:    400 px (editing esteso / automazione / velocity) */
-    static constexpr int compactTrackHeight = 96;
-    static constexpr int mediumTrackHeight  = 256;
-    static constexpr int fullTrackHeight    = 400;
+    // Preview levels match an event span row, including its cut rail. The fixture's old
+    // three-step cycle must not keep running for Audio/Image/Automation.
+    static constexpr int compactTrackHeight = ayra::timeline_panel::height_presets::compact;
+    static constexpr int mediumTrackHeight = ayra::timeline_panel::height_presets::midiEditor;
+    static constexpr int fullTrackHeight = ayra::timeline_panel::height_presets::expanded;
 
-    [[nodiscard]] inline int nextCanonicalHeight (const float currentVisualHeight) noexcept
+    [[nodiscard]] inline int nextCanonicalHeight(float h, bool midi=false) noexcept
+    {return ayra::timeline_panel::height_presets::next(h,midi);}
+    [[nodiscard]] inline int nextModelHeight(float current, float zoom, bool midi=false) noexcept
+    {return juce::roundToInt(static_cast<float>(nextCanonicalHeight(current,midi)) /
+                             std::max(0.01f, zoom));}
+    /** The pre-change hit policy, with specialist tools protected. The action
+        (shared lane height cycle) is independent from this hit-test. */
+    [[nodiscard]] inline bool isHeaderAreaOrClosedClip(TimelineClipZone z,
+                                                        float bodyHeight,int marker=-1) noexcept
     {
-        if (currentVisualHeight < 150.0f) return mediumTrackHeight;
-        if (currentVisualHeight < 320.0f) return fullTrackHeight;
-        return compactTrackHeight;
+        if(z==TimelineClipZone::clipTitleMove) return true;
+        if(z==TimelineClipZone::topWarpRail && marker<0) return true;
+        return bodyHeight<48.0f && (z==TimelineClipZone::none || z==TimelineClipZone::clipBody);
     }
 
-    [[nodiscard]] inline int nextModelHeight (const float currentVisualHeight, const float verticalZoom) noexcept
-    {
-        const float vZoom = std::max (0.01f, verticalZoom);
-        return juce::roundToInt (static_cast<float> (nextCanonicalHeight (currentVisualHeight)) / vZoom);
-    }
-
-    /** Verifica se l'interazione del mouse avviene nell'header della clip o se la clip
-        e' talmente compressa verticalmente (< 48px) che l'intera superficie risponde al
-        doppio click di riapertura/espansione (eccetto bracket laterali estremi). */
-    [[nodiscard]] inline bool isHeaderAreaOrClosedClip (
-        const TimelineClipZone zone,
-        const float clipVisualHeight,
-        const int markerIdx = -1) noexcept
-    {
-        if (zone == TimelineClipZone::clipTitleMove) return true;
-        if (zone == TimelineClipZone::topWarpRail && markerIdx < 0) return true;
-        if (clipVisualHeight < 48.0f)
-        {
-            return ! isClipEdgeZone (zone);
-        }
-        return false;
-    }
 }
 
 /** Slot geometrico in cui risiede la decorazione rispetto al corpo della clip. */
@@ -651,6 +675,10 @@ struct ClipFeatures
     bool showFadeHandles = true;
     bool showEdgeTools = true;
     bool showDisplacementBadges = true;
+    bool showWarpControls = true; // triangles / add button; NOT the vertical lines
+    bool showEnvelopePreview = false;
+    bool glueHover = false;
+
 };
 
 /** Calcola la visibilita' Level of Detail (LOD) in base all'altezza della clip
@@ -659,16 +687,21 @@ struct ClipFeatures
     const ClipFeatures& baseFeatures,
     const float clipHeight,
     const bool isDraggingWarp = false,
-    const bool isDraggingGain = false) noexcept
+    const bool isDraggingGain = false,
+    const float laneHeight = -1.0f) noexcept
 {
     juce::ignoreUnused (isDraggingWarp);
     ClipFeatures f = baseFeatures;
 
     // Warp Rail: non deve mai nascondersi con lo zoom verticale (visibile finche' abilitato)
     f.showWarpRail = f.warpEnabled;
+    f.showWarpControls = f.warpEnabled && (laneHeight < 0.0f
+        || laneHeight >= ayra::timeline_panel::visual_metrics::warpControlsLaneHeight);
 
     // Gain / MIDI CC Envelope: si nasconde sotto i 46px di altezza della clip, salvo se in drag attivo
-    f.showGainEnvelope = f.gainEnabled && (clipHeight >= 46.0f || isDraggingGain);
+    f.showGainEnvelope = f.gainEnabled && ((clipHeight >= ayra::timeline_panel::visual_metrics::minimumEnvelopeBodyHeight
+        && (laneHeight < 0.0f || laneHeight >= ayra::timeline_panel::visual_metrics::warpControlsLaneHeight)) || isDraggingGain);
+    f.showEnvelopePreview = f.gainEnabled && !f.showGainEnvelope;
 
     // Cut Rail: non deve mai nascondersi con lo zoom verticale (visibile finche' abilitato)
     f.showCutRail = f.cutEnabled;
@@ -692,7 +725,7 @@ struct ClipOverflowMetrics
 [[nodiscard]] inline ClipOverflowMetrics computeClipOverflows (const ClipFeatures& f) noexcept
 {
     ClipOverflowMetrics m;
-    m.top = f.showWarpRail ? 8.0f : 0.0f;
+    m.top = f.showWarpControls ? 8.0f : 0.0f;
     m.bottom = f.showCutRail ? 6.0f : 0.0f;
     m.horizontal = 9.0f;
     return m;
@@ -1674,6 +1707,27 @@ template <typename PointType>
     return evaluateAutomationSegment (start, end, normX);
 }
 
+/** Small, read-only envelope occupies the lower part of the compact body. */
+[[nodiscard]] inline juce::Rectangle<float> compactEnvelopeBounds(juce::Rectangle<float> body) noexcept
+{
+    const float top=juce::jmin(8.0f,body.getHeight()*0.5f);
+    return body.withTrimmedTop(top).withTrimmedBottom(juce::jmin(2.0f,body.getHeight()*0.1f));
+}
+
+/** A constrained fade is never included in the editable continuous stroke. */
+inline void drawNonInsertableFade(juce::Graphics& g, const BoundedCurvePixelSegment& segment,
+                                  juce::Colour colour, bool previewOnly)
+{
+    juce::Path path, dashed;
+    path.startNewSubPath(segment.start);
+    appendBoundedCurvePixelSegment(path,segment);
+    constexpr float dashes[]{3.0f,3.0f};
+    juce::PathStrokeType(previewOnly?0.75f:1.6f,juce::PathStrokeType::curved,
+                         juce::PathStrokeType::butt).createDashedStroke(dashed,path,dashes,2);
+    g.setColour(colour.withMultipliedAlpha(previewOnly?0.85f:0.95f));
+    g.fillPath(dashed);
+}
+
 /** Parametri di rendering per la funzione LookAndFeel unificata drawAutomationCurve. */
 struct AutomationCurveParams
 {
@@ -1700,6 +1754,7 @@ struct AutomationCurveParams
     juce::String draggingAllBadgeText;
     float draggingAllNormY = 0.5f;
     float dragAnchorX = -1.0f;
+    bool previewOnly = false;
 };
 
 /** Punto dell'inviluppo audio materializzato per la vista.
@@ -3003,6 +3058,7 @@ struct ContinuousLineVisual
     TimelineClipZone hoveredZone { TimelineClipZone::none };
     int hoveredPointIdx = -1;
     int hoveredSegmentIdx = -1;
+    bool previewOnly = false;
 };
 
 struct ContinuousLineLayout

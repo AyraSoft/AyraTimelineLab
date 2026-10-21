@@ -260,7 +260,7 @@ int main(int argc,char** argv)
             CHECK(l.backdrop.isEmpty()||std::abs(l.backdrop.getCentreY()-area.getCentreY())<=1);
             if(l.twoLines&&!l.type.isEmpty())CHECK(l.track.getRight()==l.type.getRight());
             if(image.isValid())for(int x=0;x<juce::jmin(18,image.getWidth());++x)
-                for(int y=0;y<image.getHeight();++y)CHECK(image.getPixelAt(x,y).getAlpha()==0);
+                for(int y=0;y<image.getHeight();++y)CHECK(image.getPixelAt(left?image.getWidth()-1-x:x,y).getAlpha()==0);
             if(width>=540&&height>=64){CHECK(l.twoLines);CHECK(std::abs(l.backdrop.getCentreY()-area.getCentreY())<=1);CHECK(l.trackFont.getHeightInPoints()==12.5f);}
         }
         for(bool left:{false,true})for(float scale:{1.0f,1.25f,1.5f,2.0f})
@@ -272,7 +272,7 @@ int main(int argc,char** argv)
         c.status={bool(flags&1),bool(flags&2),bool(flags&4),bool(flags&8),bool(flags&16),bool(flags&32),bool(flags&64)};
         const auto l=TimelineIdentityLayout::make({0,0,800,96},c,TimelineIdentityArtwork::typography());
         CHECK(l.previous.getWidth()==16&&l.next.getHeight()==18);CHECK(l.previous.getRight()+2==l.next.getX());
-        CHECK(l.type.getRight()<l.previous.getX());CHECK(l.backdrop.getWidth()<=229);CHECK(l.backdrop.getHeight()==40);
+        CHECK(l.type.getRight()<l.previous.getX());CHECK(l.backdrop.getWidth()<=255);CHECK(l.backdrop.getHeight()==40);
         CHECK(l.mute.isEmpty()==!c.muted);CHECK(l.solo.isEmpty()==!c.soloed);
         CHECK(!c.muted||l.mute.getX()>l.track.getRight());CHECK(!c.soloed||l.solo.getX()>l.track.getRight());
         const auto active=activeTrackIndicators(c.status);
@@ -294,6 +294,14 @@ int main(int argc,char** argv)
     for(int y=layout.backdrop.getY();y<layout.backdrop.getBottom();++y)
         for(int x=layout.backdrop.getX();x<layout.backdrop.getX()+9;++x)CHECK(masked.getPixelAt(x,y).getAlpha()==0);
     CHECK(masked.getPixelAt(layout.backdrop.getRight()-12,layout.backdrop.getCentreY()).getAlpha()>240);
+    card.onLeft=true;
+    const auto mirrored=TimelineIdentityLayout::make({0,0,320,100},card,TimelineIdentityArtwork::typography());
+    const auto inverted=TimelineIdentityArtwork::prepareUnderlay(flat,1,mirrored,{0,0,320,100});
+    CHECK(mirrored.onLeft);
+    CHECK(inverted.getPixelAt(mirrored.backdrop.getX()+12,mirrored.backdrop.getCentreY()).getAlpha()>240);
+    for(int y=mirrored.backdrop.getY();y<mirrored.backdrop.getBottom();++y)
+        for(int x=mirrored.backdrop.getRight()-9;x<mirrored.backdrop.getRight();++x)
+            CHECK(inverted.getPixelAt(x,y).getAlpha()==0);
     // A single open V, never a closed transport triangle/bar.
     for(bool right:{false,true}) {
         auto path=ayra::lab::TimelineLaneControls::navigationPath({0,0,22,22},right);

@@ -2,6 +2,7 @@
 #include <ayra_timeline/ayra_timeline_presentation.h>
 #include <unordered_set>
 #include <memory>
+#include <functional>
 
 namespace ayra::lab
 {
@@ -12,6 +13,8 @@ struct CanvasViewportBinding
     bool enabled=false, selected=false;
     ayra::timeline::TimelineTimeWindow time;
     juce::Colour ownerColour;
+    std::function<void()> cycleHeight; // presentation-only; installed by the host
+    std::function<std::function<void(bool)>(const std::string&)> prepareTemporalGroup;
     std::shared_ptr<const std::unordered_set<std::string>> canonicalClipIds;
     bool containsCanonicalClip(const std::string& id)const
     {return canonicalClipIds&&canonicalClipIds->contains(id);}

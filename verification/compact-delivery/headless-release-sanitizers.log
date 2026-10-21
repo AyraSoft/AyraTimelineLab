@@ -1,0 +1,62 @@
+-- Ayra visual source: ayra_ui snapshot (not live Multiverse)
+-- Configuring done (5.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/build-release
+[1/4] Building CXX object CMakeFiles/ayra_timeline_panel_tests.dir/tests/TimelinePanelTests.cpp.o
+[2/4] Linking CXX executable ayra_timeline_panel_tests
+[3/4] Building CXX object CMakeFiles/ayra_panel_fixture_tests.dir/tests/PanelFixtureTests.cpp.o
+[4/4] Linking CXX executable ayra_panel_fixture_tests
+Internal ctest changing into directory: /mnt/data/build-release
+Test project /mnt/data/build-release
+    Start 1: height_presets
+1/6 Test #1: height_presets ...................   Passed    0.00 sec
+    Start 2: event_row_layout
+2/6 Test #2: event_row_layout .................   Passed    0.01 sec
+    Start 3: core_regressions
+3/6 Test #3: core_regressions .................   Passed    0.00 sec
+    Start 4: timeline_panel_contracts
+4/6 Test #4: timeline_panel_contracts .........   Passed    0.02 sec
+    Start 5: timeline_fixture_transactions
+5/6 Test #5: timeline_fixture_transactions ....   Passed    0.02 sec
+    Start 6: fixture_sources
+6/6 Test #6: fixture_sources ..................   Passed    0.91 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Total Test time (real) =   0.96 sec
+PASS shared presentation-height levels
+PASS 37797 actual event-row layout assertions
+PASS: 208 core assertions
+PASS 956 checks (presentation only; no native GUI claim)
+PASS 154 fixture/transaction checks
+-- Ayra visual source: ayra_ui snapshot (not live Multiverse)
+-- Configuring done (5.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /mnt/data/build-sanitizers
+[1/4] Building CXX object CMakeFiles/ayra_timeline_panel_tests.dir/tests/TimelinePanelTests.cpp.o
+[2/4] Linking CXX executable ayra_timeline_panel_tests
+[3/4] Building CXX object CMakeFiles/ayra_panel_fixture_tests.dir/tests/PanelFixtureTests.cpp.o
+[4/4] Linking CXX executable ayra_panel_fixture_tests
+Internal ctest changing into directory: /mnt/data/build-sanitizers
+Test project /mnt/data/build-sanitizers
+    Start 1: height_presets
+1/6 Test #1: height_presets ...................   Passed    0.01 sec
+    Start 2: event_row_layout
+2/6 Test #2: event_row_layout .................   Passed    0.02 sec
+    Start 3: core_regressions
+3/6 Test #3: core_regressions .................   Passed    0.02 sec
+    Start 4: timeline_panel_contracts
+4/6 Test #4: timeline_panel_contracts .........   Passed    0.07 sec
+    Start 5: timeline_fixture_transactions
+5/6 Test #5: timeline_fixture_transactions ....   Passed    0.06 sec
+    Start 6: fixture_sources
+6/6 Test #6: fixture_sources ..................   Passed    0.82 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Total Test time (real) =   0.99 sec
+PASS shared presentation-height levels
+PASS 37797 actual event-row layout assertions
+PASS: 208 core assertions
+PASS 956 checks (presentation only; no native GUI claim)
+PASS 154 fixture/transaction checks

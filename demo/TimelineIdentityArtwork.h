@@ -39,15 +39,16 @@ public:
         const auto r = area.withPosition(0, 0).toFloat();
         const bool dark = ayra::tokens::detail::dark();
         const auto glass = dark ? juce::Colour(0xff080d16) : juce::Colour(0xffdbe1ed);
-        // CSS linear-gradient(105deg, .72 at 0%, .32 at 75%, 0 at 100%).
+        // Strong legibility core with a light-aware outward dissolve; never a full-height header.
         // Mirror the direction when docked right, not the text or its hierarchy.
         const float sign = content.onLeft ? 1.0f : -1.0f;
         const float dx = 0.9659258f * sign, dy = 0.2588190f;
         const float length = std::abs(dx) * r.getWidth() + dy * r.getHeight();
         const auto a = r.getCentre() - juce::Point<float>(dx, dy) * (length * 0.5f);
         const auto b = r.getCentre() + juce::Point<float>(dx, dy) * (length * 0.5f);
-        juce::ColourGradient gradient(glass.withAlpha(0.94f), a, glass.withAlpha(0.0f), b, false);
-        gradient.addColour(0.75, glass.withAlpha(0.70f));
+        juce::ColourGradient gradient(glass.withAlpha(dark?0.96f:0.91f), a, glass.withAlpha(0.0f), b, false);
+        // Keep the whole text area legible; dissolve only near the feathered edge.
+        gradient.addColour(0.88, glass.withAlpha(dark?0.91f:0.86f));
         g.setGradientFill(gradient); g.fillRoundedRectangle(r, 7.0f);
         // Bake the rim into the same feathered material. An unmasked vector
         // highlight would reveal the very left corners we intend to dissolve.
@@ -59,13 +60,15 @@ public:
         }
         return mask(result,layout,area,2.0f);
     }
-    // The first nine logical pixels are COMPLETELY clear: both 7px corners
-    // disappear before the smooth fade begins. Independent of the name side.
-    static float edgeAlpha(float x) noexcept
+    // Hide the OUTER corners, not always the left ones: when the label is
+    // docked left, its solid edge belongs left and the feather belongs right.
+    static float outerAlpha(float distanceFromOuterEdge) noexcept
     {
-        const auto u=juce::jlimit(0.0f,1.0f,(x-9.0f)/16.0f);
+        const auto u=juce::jlimit(0.0f,1.0f,(distanceFromOuterEdge-9.0f)/16.0f);
         return u*u*(3.0f-2.0f*u);
     }
+    // Compatibility for the earlier visual fixtures.
+    static float leftAlpha(float x) noexcept {return outerAlpha(x);}
     static juce::Image mask(const juce::Image& source,const timeline_panel::TimelineIdentityLayout& layout,
                             juce::Rectangle<int> bounds,float scale)
     {
@@ -74,12 +77,12 @@ public:
         {
             juce::Graphics m(alpha);m.addTransform(juce::AffineTransform::scale(scale));
             const auto lens=layout.backdrop.translated(-bounds.getX(),-bounds.getY()).toFloat();
-            // Feather the trailing edge: left for right-docked cards, right for left-docked cards.
-            const float edge=layout.onLeft?lens.getRight():lens.getX();
-            const float direction=layout.onLeft?-1.0f:1.0f;
-            juce::ColourGradient fade(juce::Colours::transparentWhite,edge+direction*9.0f,lens.getY(),
-                                      juce::Colours::white,edge+direction*25.0f,lens.getY(),false);
-            for(int i=1;i<8;++i)fade.addColour(i/8.0,juce::Colours::white.withAlpha(edgeAlpha(9.0f+2.0f*i)));
+            const auto outer=layout.onLeft?lens.getRight():lens.getX();
+            const auto inward=layout.onLeft?-1.0f:1.0f;
+            juce::ColourGradient fade(juce::Colours::transparentWhite,outer+inward*9.0f,lens.getY(),
+                                      juce::Colours::white,outer+inward*25.0f,lens.getY(),false);
+            for(int i=1;i<8;++i)
+                fade.addColour(i/8.0,juce::Colours::white.withAlpha(outerAlpha(9.0f+16.0f*i/8.0f)));
             m.setGradientFill(fade);m.fillRoundedRectangle(lens,7.0f);
         }
         juce::Image result(juce::Image::ARGB,source.getWidth(),source.getHeight(),true);

@@ -108,9 +108,9 @@ void resizeAndViewport()
     CHECK(!c.updateResize(std::numeric_limits<double>::infinity()));
     CHECK(c.updateResize(50000)); CHECK(c.height("a.audio") == 1200);
     CHECK(!c.endResize(false)); CHECK(c.height("a.audio") == 176);
-    CHECK(c.beginResize("a.audio")); CHECK(c.updateResize(-1000)); CHECK(c.height("a.audio") == 64);
-    CHECK(c.endResize(true)); CHECK(c.height("a.audio") == 64); CHECK(c.undoView()); CHECK(c.height("a.audio") == 176);
-    CHECK(c.redoView()); CHECK(c.height("a.audio") == 64);
+    CHECK(c.beginResize("a.audio")); CHECK(c.updateResize(-1000)); CHECK(c.height("a.audio") == height_presets::compact);
+    CHECK(c.endResize(true)); CHECK(c.height("a.audio") == height_presets::compact); CHECK(c.undoView()); CHECK(c.height("a.audio") == 176);
+    CHECK(c.redoView()); CHECK(c.height("a.audio") == height_presets::compact);
     std::mt19937 random(8173);
     for (int iteration = 0; iteration < 400; ++iteration)
     {

@@ -7,7 +7,7 @@
 #pragma once
 
 #include "ayra_ui.h"
-#include <ayra_curves/ayra_curves.h>
+#include "ayra_CurveProvider.h"
 
 #include <algorithm>
 #include <cmath>
@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "component/ayra_CutRailGroupGesture.h"
 #include "visual/ayra_ClipVisual.h"
 #include "visual/ayra_ImageClipVisual.h"
 #include "component/ayra_ClipComponent.h"

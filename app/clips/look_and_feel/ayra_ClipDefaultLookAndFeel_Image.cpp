@@ -304,6 +304,19 @@ void ClipDefaultLookAndFeel::drawImageClip (
 
         // 5. Linea dell'Opacita' continua (0% .. 100%) — visibile a zoom medio e grande (showGainEnvelope)
         //    ZERO allocazioni heap durante il paint (buffer inline su stack).
+        if(v.features.showEnvelopePreview)
+        {
+            std::vector<AutomationPoint> points;
+            if(v.opacityPoints && v.numOpacityPoints>=2) {
+                points.reserve(static_cast<std::size_t>(v.numOpacityPoints));
+                for(int i=0;i<v.numOpacityPoints;++i)points.push_back(opacityPointAsAutomationPoint(v.opacityPoints[i]));
+            } else points={{0.0f,v.baseOpacity,0.5f,false},{1.0f,v.baseOpacity,0.5f,false}};
+            AutomationCurveParams p;
+            p.bounds=compactEnvelopeBounds(v.bounds);p.points=points.data();p.numPoints=static_cast<int>(points.size());
+            p.boundaryPolicy=AutomationBoundaryPolicy::fadeEndpoints;
+            p.fadeInControl=v.fadeInControl;p.fadeOutControl=v.fadeOutControl;p.previewOnly=true;
+            drawAutomationCurve(g,p,&component);
+        }
         if (v.features.showGainEnvelope)
         {
             auto opacityToY = [&] (float op) -> float
@@ -376,7 +389,7 @@ void ClipDefaultLookAndFeel::drawImageClip (
             const bool hasFadeIn = boundaryGeometry.hasFadeIn;
             const bool hasFadeOut = boundaryGeometry.hasFadeOut;
 
-            juce::Path envLine;
+            juce::Path envLine, editableLine;
             if (hasFadeIn)
             {
                 envLine.startNewSubPath (boundaryGeometry.fadeIn.start);
@@ -389,6 +402,7 @@ void ClipDefaultLookAndFeel::drawImageClip (
                 envLine.startNewSubPath (nodes.getFirst().renderX, nodes.getFirst().y);
             }
 
+            editableLine.startNewSubPath(nodes.getFirst().renderX,nodes.getFirst().y);
             for (int s = 0; s + 1 < nodes.size(); ++s)
             {
                 const auto& n0 = nodes.getReference (s);
@@ -416,6 +430,8 @@ void ClipDefaultLookAndFeel::drawImageClip (
                     makeBoundedCurvePixelSegment (
                         { n0.renderX, n0.y }, { n1.renderX, n1.y },
                         control));
+                appendBoundedCurvePixelSegment(editableLine,
+                    makeBoundedCurvePixelSegment({n0.renderX,n0.y},{n1.renderX,n1.y},control));
             }
 
             if (hasFadeOut)
@@ -468,9 +484,14 @@ void ClipDefaultLookAndFeel::drawImageClip (
 
             // C) Disegno continuo della linea di Opacita' (alone scuro + linea crisp bianca)
             g.setColour (juce::Colour (0x65000000));
-            g.strokePath (envLine, juce::PathStrokeType (4.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath (editableLine, juce::PathStrokeType (4.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
             g.setColour (juce::Colours::white.withAlpha (0.95f));
-            g.strokePath (envLine, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            g.strokePath (editableLine, juce::PathStrokeType (1.8f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            // Fade boundary arcs are deliberately NOT editable by point insertion.
+            // Distinguish only these end segments; the middle opacity curve
+            // retains its existing painter and interaction geometry.
+            if(hasFadeIn)drawNonInsertableFade(g,boundaryGeometry.fadeIn,juce::Colours::white,false);
+            if(hasFadeOut)drawNonInsertableFade(g,boundaryGeometry.fadeOut,juce::Colours::white,false);
 
             // D) Handle di curvatura (pallini vuoti Multiverse)
             for (const auto& sc : segCps)
@@ -556,7 +577,7 @@ void ClipDefaultLookAndFeel::drawImageClip (
         }
 
         // Riga laser verticale bianca in hover sul taglio
-        const bool cutHover = v.features.showCutRail && (v.hoveredZone == TimelineClipZone::bottomCutRail);
+        const bool cutHover = v.features.showCutRail && !v.features.glueHover && (v.hoveredZone == TimelineClipZone::bottomCutRail);
         if (cutHover && v.hoverMouseX >= v.bounds.getX() && v.hoverMouseX <= v.bounds.getRight())
         {
             g.setColour (juce::Colours::white.withAlpha (0.9f));
@@ -569,7 +590,7 @@ void ClipDefaultLookAndFeel::drawImageClip (
     g.drawRoundedRectangle (v.bounds.reduced (0.5f), corner, v.selected ? 1.5f : 1.0f);
 
     // 7. Triangolini Warp Markers esterni superiori
-    if (v.features.showWarpRail && v.warpMarkersNorm != nullptr)
+    if (v.features.showWarpControls && v.warpMarkersNorm != nullptr)
     {
         for (int i = 0; i < v.numWarpMarkers; ++i)
         {
@@ -591,7 +612,7 @@ void ClipDefaultLookAndFeel::drawImageClip (
     }
 
     // 7b. Indicatore "+" per aggiunta nuovo Warp Marker
-    if (v.features.showWarpRail && v.showWarpAddGhost && v.warpAddGhostX >= v.bounds.getX() && v.warpAddGhostX <= v.bounds.getRight())
+    if (v.features.showWarpControls && v.showWarpAddGhost && v.warpAddGhostX >= v.bounds.getX() && v.warpAddGhostX <= v.bounds.getRight())
     {
         const float gx = v.warpAddGhostX;
         const float gy = v.bounds.getY() - 4.0f;

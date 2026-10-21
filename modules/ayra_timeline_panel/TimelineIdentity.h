@@ -28,13 +28,12 @@ struct TimelineIdentityTypography
 };
 struct TimelineIdentityLayout
 {
-    bool onLeft=false;
     juce::Rectangle<int> backdrop, performer, track, type, typeMark;
     juce::Rectangle<int> previous,next,navigationGroup,mute,solo,titleHit;
     std::array<juce::Rectangle<int>,trackIndicatorCount> indicators{};
-    bool twoLines = false, titleTruncated = false;
+    bool twoLines = false, titleTruncated = false, onLeft = false;
     juce::Font trackFont {juce::FontOptions{}}, performerFont {juce::FontOptions{}}, typeFont {juce::FontOptions{}};
-    static constexpr int maxWidth=229,minWidth=144,normalHeight=40;
+    static constexpr int maxWidth=255,minWidth=144,normalHeight=40;
     static constexpr int navigationWidth=16,navigationHeight=18,indicatorSize=6,indicatorGap=2;
     static int measuredWidth(const juce::Font& font, const juce::String& text)
     {
@@ -45,8 +44,8 @@ struct TimelineIdentityLayout
         const TimelineIdentityContent& c,const TimelineIdentityTypography& fonts)
     {
         TimelineIdentityLayout out;
-        out.onLeft=c.onLeft;
         out.twoLines=!c.compact&&area.getHeight()>=normalHeight;
+        out.onLeft=c.onLeft;
         out.trackFont=out.twoLines?fonts.track:fonts.type;
         out.performerFont=fonts.performer;out.typeFont=fonts.type;
         if(area.isEmpty())return out;
@@ -65,14 +64,16 @@ struct TimelineIdentityLayout
         const int letters=(c.muted?measuredWidth(out.trackFont,"M")+4:0)+(c.soloed?measuredWidth(out.trackFont,"S")+4:0);
         const int natural=out.twoLines?juce::jmax(perfWidth+(perfWidth&&typeGroup?10:0)+typeGroup,titleWidth+letters)
                                      :titleWidth+letters+typeGroup+(typeGroup?8:0)+(perfWidth?perfWidth+8:0)+(c.compact&&c.showType?9:0);
-        const int inset=juce::jmin(5,area.getWidth()/8);
-        const int available=juce::jmax(0,area.getWidth()-2*inset);
+        const int leftInset=juce::jmin(8,area.getWidth()/8);
+        const int rightInset=juce::jmin(14,area.getWidth()/8);
+        const int available=juce::jmax(0,area.getWidth()-leftInset-rightInset);
         const int limit=c.expanded?available:juce::jmin(available,maxWidth);
-        const int width=juce::jmin(limit,juce::jmax(minWidth,natural+38+(serviceWidth?serviceWidth+4:0)));
+        const int width=juce::jmin(limit,juce::jmax(minWidth,natural+41+(serviceWidth?serviceWidth+4:0)));
         const int height=juce::jmin(area.getHeight(),out.twoLines?normalHeight:22);
         const int top=area.getY()+(area.getHeight()-height)/2;
-        out.backdrop={c.onLeft?area.getX()+inset:area.getRight()-inset-width-5,top,width,height};
-        const auto inner=out.backdrop.withTrimmedLeft(juce::jmin(24,width/5)).withTrimmedRight(juce::jmin(14,width/5));
+        out.backdrop={c.onLeft?area.getX()+leftInset:area.getRight()-rightInset-width,top,width,height};
+        const auto inner=out.backdrop.withTrimmedLeft(juce::jmin(c.onLeft?14:27,width/5))
+                                    .withTrimmedRight(juce::jmin(c.onLeft?27:14,width/5));
         if(inner.isEmpty())return out;
         auto textArea=inner;
         // Keep a full-width text sliver even at hostile widths; empty targets
