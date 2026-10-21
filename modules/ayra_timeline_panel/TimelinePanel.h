@@ -79,7 +79,8 @@ struct LaneCanvas
     // Canvas-local, side-effect-free query using the SAME clip/editor geometry
     // as input. A component's rectangular hitTest or a lane time interval is
     // not proof of a clip here. Missing callback = no hover suppression.
-    std::function<bool(juce::Point<float>)> containsClipAt; // compatibility fallback
+    std::function<bool(juce::Point<float>)> containsClipAt;
+    std::function<bool(juce::Point<float>)> containsZoomTargetAt; // compatibility fallback
     // All real content targets: clips, points, spans, curves and handles. This
     // must use the canvas input geometry, not its full rectangular hitTest.
     std::function<bool(juce::Point<float>)> containsEditableAt;
@@ -323,7 +324,7 @@ private:
             void mouseExit(const juce::MouseEvent& e) override { observe(e); }
             void mouseDown(const juce::MouseEvent& e) override { changed(e,true); }
             void mouseDrag(const juce::MouseEvent& e) override { changed(e,true); }
-            void mouseUp(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
+            void mouseUp(const juce::MouseEvent& e) override { changed(e);owner.zoomOnCanvasDoubleClick(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
             void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
             void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails&) override { changed(e); }
         private:
@@ -537,13 +538,26 @@ private:
                 dragging=false;host.dropLane.clear();host.refresh();if(host.onSelectionChanged)host.onSelectionChanged();
             }
         }
+        void zoomOnCanvasDoubleClick(const juce::MouseEvent& e)
+        {
+            if(!e.mods.isLeftButtonDown()||!canvas.containsZoomTargetAt||!canvas.component)return;
+            if(e.eventComponent!=canvas.component.get())return;
+            if(canvas.containsZoomTargetAt(e.getEventRelativeTo(canvas.component.get()).position))toggleCompactHeight();
+        }
         void toggleCompactHeight()
         {
             const auto* lane=host.controller.lane(row.lane);
             if(!lane||lane->heightPolicy!=HeightPolicy::manual)return;
             const int minimum=host.controller.minimumHeight(*lane);
-            const int expanded=juce::jmax(lane->initialHeight,minimum+24);
-            host.controller.setHeight(row.lane,host.controller.height(row.lane)<=minimum+2?expanded:minimum);
+            const int current=host.controller.height(row.lane);
+            if(lane->visual==VisualKind::midi){
+                const int notes=juce::jmax(minimum+1,96);
+                const int velocities=juce::jmax(notes+1,256);
+                host.controller.setHeight(row.lane,current<notes-2?notes:current<velocities-2?velocities:minimum);
+            }else{
+                const int expanded=juce::jmax(lane->initialHeight,minimum+24);
+                host.controller.setHeight(row.lane,current<=minimum+2?expanded:minimum);
+            }
             host.refresh();
         }
         void mouseDoubleClick(const juce::MouseEvent& e)override
