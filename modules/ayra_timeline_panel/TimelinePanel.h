@@ -324,7 +324,7 @@ private:
             void mouseDown(const juce::MouseEvent& e) override { changed(e,true); }
             void mouseDrag(const juce::MouseEvent& e) override { changed(e,true); }
             void mouseUp(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
-            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.handleCanvasDoubleClick(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
+            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
             void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails&) override { changed(e); }
         private:
             LaneRow& owner;
@@ -545,15 +545,6 @@ private:
             const int expanded=juce::jmax(lane->initialHeight,minimum+24);
             host.controller.setHeight(row.lane,host.controller.height(row.lane)<=minimum+2?expanded:minimum);
             host.refresh();
-        }
-        void handleCanvasDoubleClick(const juce::MouseEvent& e)
-        {
-            if(!e.mods.isLeftButtonDown()||!canvas.component||e.eventComponent!=canvas.component.get())return;
-            const auto local=e.getEventRelativeTo(canvas.component.get()).position;
-            // A real editable hit owns its gesture (points, trims, fades, etc.).
-            if(canvas.containsEditableAt&&canvas.containsEditableAt(local))return;
-            if(canvas.containsClipAt&&!canvas.containsClipAt(local))return;
-            toggleCompactHeight();
         }
         void mouseDoubleClick(const juce::MouseEvent& e)override
         {if(geometry.isAccent(e.x,e.y)||geometry.resizeHit.contains(e.x,e.y))toggleCompactHeight();}
