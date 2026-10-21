@@ -50,6 +50,7 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
                ||requires(const Canvas& c){c.containsPanelClipAt(juce::Point<float>{});},
                   "Every canvas must expose its real editable-content hit geometry");
     auto* raw=component.get();const auto key=std::make_pair(sourceLane.id,sourceLane.visual);
+    raw->panelView.cycleHeight=[&legacy, id=sourceLane.id]{if(legacy.onPanelHeightCycle)legacy.onPanelHeightCycle(id);};
     if(const auto it=states.find(key);it!=states.end())raw->restorePanelState(it->second);
     panel::LaneCanvas result;
     if constexpr(requires {raw->containsPanelEditableAt(juce::Point<float>{});})
@@ -93,6 +94,7 @@ public:
         // Retain the old host API, not its old row model or per-change layout work.
         legacy.store()=Store(makePanelFixture());
         legacy.store().changed=nullptr;
+        legacy.onPanelHeightCycle=[this](const std::string& id){if(controller.cycleHeight(id))surface->refresh();};
         bridge=std::make_unique<PanelFixtureHost>(legacy.store());
         bridge->onChanged=[this]{triggerAsyncUpdate();};
         bridge->onOpenOwner=[this](const auto& id){openOwner(id);};
@@ -149,7 +151,7 @@ public:
     }
     ~TimelinePanelDemo() override
     {
-        cancelPendingUpdate();legacy.onTimelineContextMenuRequested=nullptr;
+        cancelPendingUpdate();legacy.onTimelineContextMenuRequested=nullptr;legacy.onPanelHeightCycle={};
         surface.reset();bridge.reset();setLookAndFeel(nullptr);
     }
     void resized()override

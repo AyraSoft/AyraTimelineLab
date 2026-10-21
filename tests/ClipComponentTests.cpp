@@ -896,33 +896,28 @@ int main()
         require (clip_midi_law::noteAndVelocityTrackHeight == clip_height_law::fullTrackHeight,
                  "clip_midi_law::noteAndVelocityTrackHeight must match clip_height_law::fullTrackHeight");
 
-        require (clip_height_law::nextCanonicalHeight (30.0f) == clip_height_law::mediumTrackHeight,
-                 "closed clip at 30px must expand to medium canonical height");
-        require (clip_height_law::nextCanonicalHeight (96.0f) == clip_height_law::mediumTrackHeight,
-                 "compact clip at 96px must expand to medium canonical height");
-        require (clip_height_law::nextCanonicalHeight (256.0f) == clip_height_law::fullTrackHeight,
-                 "medium clip at 256px must expand to full canonical height");
-        require (clip_height_law::nextCanonicalHeight (400.0f) == clip_height_law::compactTrackHeight,
-                 "full clip at 400px must cycle back to compact canonical height");
-
-        require (clip_height_law::nextModelHeight (96.0f, 1.0f) == 256,
-                 "nextModelHeight at zoom 1.0 must be 256");
-        require (clip_height_law::nextModelHeight (96.0f, 2.0f) == 128,
-                 "nextModelHeight at zoom 2.0 must scale to 128");
-
-        // Verifica di isHeaderAreaOrClosedClip
-        require (clip_height_law::isHeaderAreaOrClosedClip (TimelineClipZone::clipTitleMove, 120.0f),
-                 "clipTitleMove must always be recognized as header area");
-        require (clip_height_law::isHeaderAreaOrClosedClip (TimelineClipZone::topWarpRail, 120.0f, -1),
-                 "topWarpRail without marker must be recognized as header area");
-        require (! clip_height_law::isHeaderAreaOrClosedClip (TimelineClipZone::topWarpRail, 120.0f, 0),
-                 "topWarpRail with marker must NOT be recognized as header area");
-        require (clip_height_law::isHeaderAreaOrClosedClip (TimelineClipZone::none, 30.0f),
-                 "closed clip body (< 48px) must respond to double click for expansion");
-        require (! clip_height_law::isHeaderAreaOrClosedClip (TimelineClipZone::edgeLeftTrim, 30.0f),
-                 "edge trim on closed clip must remain trim, not header");
-        require (! clip_height_law::isHeaderAreaOrClosedClip (TimelineClipZone::none, 120.0f),
-                 "open clip body (>= 48px) must not swallow normal body clicks");
+        require (clip_height_law::compactTrackHeight == 24,
+                 "compact media preview should match a single event row");
+        require (clip_height_law::nextCanonicalHeight (24.0f) == 400,
+                 "audio/image/automation should expand directly from 24 to 400");
+        require (clip_height_law::nextCanonicalHeight (400.0f) == 24,
+                 "audio/image/automation must return directly to 24");
+        require (clip_height_law::nextCanonicalHeight (24.0f, true) == 256
+                 && clip_height_law::nextCanonicalHeight (256.0f, true) == 400
+                 && clip_height_law::nextCanonicalHeight (400.0f, true) == 24,
+                 "MIDI cycles 24 -> 256 -> 400 -> 24");
+        require (clip_height_law::nextModelHeight (24.0f, 2.0f) == 200,
+                 "visual heights transform through legacy zoom exactly once");
+        require (clip_height_law::isUnclaimedDoubleClickZone (TimelineClipZone::clipBody)
+                 && clip_height_law::isUnclaimedDoubleClickZone (TimelineClipZone::none)
+                 && clip_height_law::isUnclaimedDoubleClickZone (TimelineClipZone::midiNoteBody),
+                 "unclaimed body clicks request height cycling");
+        for (auto zone : {TimelineClipZone::gainEnvelopeLine, TimelineClipZone::gainEnvelopePoint,
+                          TimelineClipZone::warpMarker, TimelineClipZone::fadeInCurveHandle,
+                          TimelineClipZone::fadeOutCurveHandle, TimelineClipZone::edgeLeftTrim,
+                          TimelineClipZone::midiPitchScrollbar})
+            require (!clip_height_law::isUnclaimedDoubleClickZone (zone),
+                     "specialized double clicks must retain their existing behavior");
 
         // Verifica del Principio Canonico del Tratteggio: canAutomationPointMoveHorizontally
         require (! canAutomationPointMoveHorizontally (AutomationBoundaryPolicy::pinnedEndpoints, 0, 3),

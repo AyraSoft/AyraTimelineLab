@@ -1,5 +1,6 @@
 #pragma once
 #include "TimelineTrackStatus.h"
+#include "TimelineHeightPresets.h"
 // Portable, message-thread presentation contracts. No JUCE, DSP, media or document writes.
 // Owner IDs, lane IDs and clip IDs are opaque canonical identities, never display indices.
 #include <ayra_timeline/ayra_timeline_presentation.h>
@@ -50,7 +51,7 @@ struct Lane
     std::string name;
     Stream stream = Stream::audio;
     VisualKind visual = VisualKind::audio;
-    int initialHeight = 176, minimumHeight = 64, maximumHeight = 1200;
+    int initialHeight = 176, minimumHeight = height_presets::compact, maximumHeight = 1200;
     bool pinned = false;
     HeightPolicy heightPolicy = HeightPolicy::manual;
     bool navigation = true;
@@ -447,6 +448,15 @@ public:
         if (at == rest.end()) return Result::fail("Missing destination");
         rest.insert(at, picked.begin(), picked.end()); order = std::move(rest);
         change(std::move(next)); return {};
+    }
+    // Only the presentation height changes. Never call a media/document resize
+    // from a double click in the headless panel.
+    bool cycleHeight(const Id& id)
+    {
+        const auto* l = lane(id);
+        if (!l || l->heightPolicy != HeightPolicy::manual || resize) return false;
+        return setHeight(id, height_presets::next(static_cast<float>(height(id)),
+                                                   l->visual == VisualKind::midi));
     }
     bool setHeight(const Id& id, int pixels)
     {
