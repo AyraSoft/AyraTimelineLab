@@ -324,8 +324,8 @@ private:
             void mouseExit(const juce::MouseEvent& e) override { observe(e); }
             void mouseDown(const juce::MouseEvent& e) override { changed(e,true); }
             void mouseDrag(const juce::MouseEvent& e) override { changed(e,true); }
-            void mouseUp(const juce::MouseEvent& e) override { changed(e);owner.zoomOnCanvasDoubleClick(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
-            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
+            void mouseUp(const juce::MouseEvent& e) override { changed(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
+            void mouseDoubleClick(const juce::MouseEvent& e) override { changed(e);owner.zoomOnCanvasDoubleClick(e);owner.updateNavigationEnabled();owner.measureAutoHeight(); }
             void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails&) override { changed(e); }
         private:
             LaneRow& owner;
