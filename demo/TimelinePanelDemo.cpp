@@ -82,6 +82,8 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
             }
         }
     };
+    if constexpr(requires {raw->containsPanelZoomTargetAt(juce::Point<float>{});})
+        result.containsZoomTargetAt=[raw](juce::Point<float> point){return raw->containsPanelZoomTargetAt(point);};
     result.component=std::move(component);return result;
 }
 class TimelinePanelDemo final:public juce::Component,private juce::AsyncUpdater
