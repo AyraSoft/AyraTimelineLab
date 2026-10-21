@@ -104,6 +104,15 @@ void ClipDefaultLookAndFeel::drawAutomationCurve (
     if (boundaryGeometry.hasFadeIn) markNonInsertableFade (boundaryGeometry.fadeIn);
     if (boundaryGeometry.hasFadeOut) markNonInsertableFade (boundaryGeometry.fadeOut);
 
+    // At compact lane heights the envelope becomes a read-only hairline:
+    // retain the actual projected curve, but do not paint point handles.
+    if (b.getHeight() < 36.0f)
+    {
+        g.setColour (p.curveColour.withAlpha (0.80f));
+        g.strokePath (envLine, juce::PathStrokeType (0.75f));
+        return;
+    }
+
     // Gli anchor interni (es. neutral 0.5 per ModWheel/Pitch) hanno una guida
     // leggera indipendente dalla curva effettiva. Non partecipa all'hit-test.
     if (boundaryGeometry.showGuide)
