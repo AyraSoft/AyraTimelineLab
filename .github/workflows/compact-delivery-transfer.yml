@@ -1,4 +1,4 @@
-name: Compact delivery source bundle
+name: Compact delivery build headers
 on:
   push:
     branches: [fix/compact-lanes-card-gesture-20261021]
@@ -6,26 +6,19 @@ on:
 permissions:
   contents: read
 jobs:
-  source:
+  headers:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - name: Bundle checked-out source and public native dependencies
-        shell: bash
+      - name: Download matching Debian development packages
         run: |
-          set -euo pipefail
-          mkdir -p transfer
-          git archive --format=tar HEAD | gzip > transfer/lab.tar.gz
-          git clone --depth 1 --branch 8.0.12 https://github.com/juce-framework/JUCE.git /tmp/JUCE
-          git -C /tmp/JUCE archive --format=tar HEAD | gzip > transfer/JUCE.tar.gz
-          git init /tmp/blur
-          git -C /tmp/blur fetch --depth 1 https://github.com/sudara/melatonin_blur.git fcc18578d9db3f9400c74ee1bb2eb1070ee959f9
-          git -C /tmp/blur archive --format=tar FETCH_HEAD | gzip > transfer/blur.tar.gz
-          git rev-parse HEAD > transfer/LAB_REVISION.txt
+          mkdir -p packages
+          docker run --rm -v "$PWD/packages:/out" debian:trixie-slim sh -ec '
+            apt-get update
+            cd /out
+            apt-get download libfreetype-dev libfontconfig-dev libpng-dev libbrotli-dev zlib1g-dev libexpat1-dev libxrandr-dev libxinerama-dev libxcursor-dev libxfixes-dev libxrender-dev libxext-dev libasound2-dev libgl-dev libglx-dev libglvnd-core-dev
+          '
       - uses: actions/upload-artifact@v4
         with:
-          name: compact-delivery-sources
-          path: transfer
+          name: compact-delivery-headers
+          path: packages/*.deb
           retention-days: 3
