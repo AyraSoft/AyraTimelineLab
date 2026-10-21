@@ -1452,7 +1452,25 @@ private:
   }
 
   void mouseDown(const juce::MouseEvent &e) override {
-    const auto hit = hitTestZones(e.position);
+    auto hit = hitTestZones(e.position);
+    // Below the former 96px editing floor there is only one edge gesture:
+    // trim with the opposite edge fixed. No slip, loop or stretch cycling.
+    if (panelView.enabled && hit.clip != nullptr &&
+        hit.bounds.getHeight() < 96.0f) {
+      switch (hit.zone) {
+        case TimelineClipZone::edgeLeftLoop:
+        case TimelineClipZone::edgeLeftSlip:
+        case TimelineClipZone::edgeLeftStretch:
+          hit.zone = TimelineClipZone::edgeLeftTrim;
+          break;
+        case TimelineClipZone::edgeRightLoop:
+        case TimelineClipZone::edgeRightSlip:
+        case TimelineClipZone::edgeRightStretch:
+          hit.zone = TimelineClipZone::edgeRightTrim;
+          break;
+        default: break;
+      }
+    }
 
     if (hit.clip != nullptr && e.mods.isPopupMenu()) {
       auto context = clips::makeTimelinePointerContext(
