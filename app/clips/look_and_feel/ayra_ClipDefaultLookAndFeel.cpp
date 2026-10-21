@@ -546,7 +546,7 @@ void ClipDefaultLookAndFeel::drawAudioClip (
     g.drawRoundedRectangle (v.bounds.reduced (0.5f), corner, v.selected ? 1.5f : 1.0f);
 
     // 7. Triangolini Warp Markers (SPORGONO ESCLUSIVAMENTE FUORI SOPRA LA CLIP)
-    if (v.bounds.getHeight() >= 96.0f && v.features.showWarpRail && v.warpMarkersNorm != nullptr)
+    if (v.bounds.getHeight() >= 64.0f && v.features.showWarpRail && v.warpMarkersNorm != nullptr)
     {
         for (int i = 0; i < v.numWarpMarkers; ++i)
         {
@@ -978,7 +978,7 @@ void ClipDefaultLookAndFeel::drawMidiClip (
     g.drawRoundedRectangle (v.bounds.reduced (0.5f), corner, v.selected ? 1.5f : 1.0f);
 
     // 7. Triangolini Warp Markers esterni superiori
-    if (v.bounds.getHeight() >= 96.0f && v.features.showWarpRail && v.warpMarkersNorm != nullptr)
+    if (v.bounds.getHeight() >= 64.0f && v.features.showWarpRail && v.warpMarkersNorm != nullptr)
     {
         for (int i = 0; i < v.numWarpMarkers; ++i)
         {
@@ -1280,7 +1280,7 @@ void ClipDefaultLookAndFeel::drawLineClip (
     g.drawRoundedRectangle (v.bounds.reduced (0.5f), corner, v.selected ? 1.5f : 1.0f);
 
     // 7. Triangolini Warp Markers esterni superiori
-    if (v.bounds.getHeight() >= 96.0f && v.features.showWarpRail && v.warpMarkersNorm != nullptr)
+    if (v.bounds.getHeight() >= 64.0f && v.features.showWarpRail && v.warpMarkersNorm != nullptr)
     {
         for (int i = 0; i < v.numWarpMarkers; ++i)
         {
