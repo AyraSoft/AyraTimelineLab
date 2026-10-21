@@ -1,0 +1,72 @@
+name: Stage compact MIDI preview fix
+on:
+  push:
+    branches: [work/midi-preview-transfer-20261021]
+    paths: [.github/workflows/midi-preview-stage.yml]
+permissions:
+  contents: write
+jobs:
+  test-and-stage:
+    runs-on: ubuntu-latest
+    env:
+      BASE: 48502a95c92ce10a8a974dc792bae45027ab0ab0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Authenticate patch and apply to frozen public source
+        run: |
+          set -euo pipefail
+          cp .delivery/midi-preview.patch /tmp/midi-preview.patch
+          echo 'fca5869f2c438ce361ea47273c0d53b03839d8bc137be950ab20faa917bf3841  /tmp/midi-preview.patch' | sha256sum -c -
+          git checkout --detach "$BASE"
+          git apply --index --whitespace=error-all /tmp/midi-preview.patch
+          git diff --cached --check
+          git diff --cached --exit-code -- .github .gitmodules
+      - name: Portable production geometry and source contracts
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/midi-preview-evidence
+          {
+            c++ -std=c++20 -O2 -Wall -Wextra -Wpedantic -Werror tests/MidiPreviewTests.cpp -o /tmp/midi-preview-tests
+            /tmp/midi-preview-tests
+            c++ -std=c++20 -g -fsanitize=address,undefined tests/MidiPreviewTests.cpp -o /tmp/midi-preview-sanitizers
+            /tmp/midi-preview-sanitizers
+            python3 tools/check_panel_boundary.py
+            python3 tests/identity/test_visual_adapter.py
+            python3 tools/generate.py --check
+          } 2>&1 | tee /tmp/midi-preview-evidence/portable.log
+      - name: Install JUCE graphics build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libasound2-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libfreetype-dev libfontconfig1-dev libgl1-mesa-dev
+      - uses: actions/checkout@v4
+        with:
+          repository: juce-framework/JUCE
+          ref: 8.0.12
+          path: .test-deps/JUCE
+          persist-credentials: false
+      - name: Compile and execute the real JUCE preview primitive
+        run: |
+          set -euo pipefail
+          cmake -S tests/midi_preview_native -B /tmp/midi-preview-build -DJUCE_SOURCE_DIR="$GITHUB_WORKSPACE/.test-deps/JUCE" -DCMAKE_BUILD_TYPE=Release 2>&1 | tee /tmp/midi-preview-evidence/configure.log
+          cmake --build /tmp/midi-preview-build --parallel 2 2>&1 | tee /tmp/midi-preview-evidence/build.log
+          ctest --test-dir /tmp/midi-preview-build -V 2>&1 | tee /tmp/midi-preview-evidence/native.log
+          cp /tmp/midi-preview-build/evidence/*.png /tmp/midi-preview-evidence/
+      - name: Publish only reviewed source changes
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git diff --cached --check
+          git diff --cached --exit-code -- .github .gitmodules
+          tree=$(git write-tree)
+          commit=$(printf '%s\n' 'Show actual MIDI notes in compact previews without enabling editing' | git commit-tree "$tree" -p "$BASE")
+          git push origin "$commit:refs/heads/fix/midi-compact-preview-20261021"
+          printf 'base=%s\ncommit=%s\ntree=%s\n' "$BASE" "$commit" "$tree" | tee /tmp/midi-preview-evidence/publication.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: midi-preview-verification
+          path: /tmp/midi-preview-evidence/
+          retention-days: 7
