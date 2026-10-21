@@ -112,7 +112,7 @@ inline Session makePanelFixture()
     };
     for(auto& lane:m->lanes) {
         // Every manual visual may fold to the same 24px single-event lane.
-        if(lane.heightPolicy==panel::HeightPolicy::manual)lane.minimumHeight=24;
+        if(lane.heightPolicy==panel::HeightPolicy::manual)lane.minimumHeight=32;
         if(lane.visual==V::point||lane.visual==V::span) {
             lane.heightPolicy=panel::HeightPolicy::automatic;
             lane.initialHeight=lane.minimumHeight=lane.visual==V::point?24:32;
