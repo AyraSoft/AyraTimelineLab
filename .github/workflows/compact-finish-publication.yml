@@ -1,0 +1,80 @@
+name: Verify compact delivery tree
+on:
+  push:
+    branches: [delivery/compact-finish-transfer-20261021]
+    paths: ['.delivery/**', '.github/workflows/compact-finish-publication.yml']
+permissions:
+  contents: write
+jobs:
+  verify-and-stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE: 88cc8f16202b1c99a5d5670bb757b8b64d69c1ba
+      TREE: e84fd9d4ab7e6b0b840f374ac314099047679bd3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Decode and authenticate the tested source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, lzma, pathlib
+          data = ''.join(pathlib.Path(f'.delivery/part-{i}.b64').read_text().strip() for i in range(3))
+          archive = base64.b64decode(data, validate=True)
+          assert hashlib.sha256(archive).hexdigest() == '23b5aca28388e25d16ba5e475b0b6aaf0e357e7ce4f4bec7c236adbdf52a3262', 'transfer hash mismatch'
+          patch = lzma.decompress(archive)
+          assert hashlib.sha256(patch).hexdigest() == 'da3e066b3d77788533fd7204865a4a40ec7819259c49a4decd84e5d624e1cf5a', 'patch hash mismatch'
+          pathlib.Path('/tmp/compact-delivery.patch').write_bytes(patch)
+          print('PASS exact compressed payload and patch SHA-256')
+          PY
+          test "$(git rev-parse origin/main)" = "$BASE"
+          git checkout --detach "$BASE"
+          git apply --index --unidiff-zero --whitespace=error-all /tmp/compact-delivery.patch
+          git diff --cached --check
+          test "$(git write-tree)" = "$TREE"
+          git diff --cached --exit-code -- .gitmodules ayra_ui/melatonin_blur
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          manifest = json.loads(pathlib.Path('verification/compact-delivery/SOURCE_MANIFEST.json').read_text())
+          for name, expected in manifest['source_git_blobs'].items():
+              data = pathlib.Path(name).read_bytes()
+              actual = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+              assert actual == expected, name
+          print('PASS every declared tested source blob; entire tree equals local tested tree')
+          PY
+      - name: Execute portable contracts on the exact delivery tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/compact-evidence
+          {
+            c++ -std=c++20 -O2 -Wall -Wextra -pedantic tests/HeightPresetTests.cpp -o /tmp/compact-heights
+            /tmp/compact-heights
+            c++ -std=c++20 -O2 -Wall -Wextra -pedantic tests/EventRowLayoutTests.cpp -o /tmp/compact-events
+            /tmp/compact-events
+            python3 tools/check_panel_boundary.py
+            python3 tests/identity/test_visual_adapter.py
+            python3 tools/generate.py --check
+            bash -n run.command
+            git diff --cached --check
+            echo "PASS delivery tree $TREE"
+          } 2>&1 | tee /tmp/compact-evidence/portable-validation.log
+      - name: Publish verified tree without temporary transport files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          test "$(git write-tree)" = "$TREE"
+          commit=$(printf '%s\n' 'Complete compact timeline behavior with native verification' | git commit-tree "$TREE" -p "$BASE")
+          git push origin "$commit:refs/heads/delivery/compact-finish-ready-20261021"
+          printf 'commit=%s\ntree=%s\nbase=%s\n' "$commit" "$TREE" "$BASE" | tee /tmp/compact-evidence/publication.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compact-delivery-verified-tree
+          path: /tmp/compact-evidence/
+          if-no-files-found: warn
