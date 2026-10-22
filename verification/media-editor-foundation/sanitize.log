@@ -1,0 +1,56 @@
+-- The CXX compiler identification is Clang 17.0.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/local/swift/usr/bin/clang++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Configuring done (0.4s)
+-- Generating done (0.0s)
+-- Build files have been written to: <BUILD_ROOT>/build-media-sanitize
+[ 50%] Building CXX object CMakeFiles/ayra_media_document_tests.dir/CaptionDocumentTests.cpp.o
+[100%] Linking CXX executable ayra_media_document_tests
+[100%] Built target ayra_media_document_tests
+Internal ctest changing into directory: <BUILD_ROOT>/build-media-sanitize
+UpdateCTestConfiguration  from :<BUILD_ROOT>/build-media-sanitize/DartConfiguration.tcl
+Parse Config file:<BUILD_ROOT>/build-media-sanitize/DartConfiguration.tcl
+UpdateCTestConfiguration  from :<BUILD_ROOT>/build-media-sanitize/DartConfiguration.tcl
+Parse Config file:<BUILD_ROOT>/build-media-sanitize/DartConfiguration.tcl
+Test project <BUILD_ROOT>/build-media-sanitize
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 1
+    Start 1: media_document_contracts
+
+1: Test command: <BUILD_ROOT>/build-media-sanitize/ayra_media_document_tests
+1: Working Directory: <BUILD_ROOT>/build-media-sanitize
+1: Test timeout computed to be: 1500
+1: PASS source-relative projection
+1: PASS move carries captions
+1: PASS trim intersects source words
+1: PASS split at word boundary
+1: PASS split inside word uses half-open fragments
+1: PASS delete cascades bindings, retains transcript
+1: PASS duplicate creates independent caption ownership
+1: PASS delete one instance does not delete another
+1: PASS failed batch rolls back all edits
+1: PASS stale revision rejected
+1: PASS invalid bindings and word identities rejected
+1: PASS overflow and negative ranges rejected without mutation
+1: PASS invalid split and duplicate identifiers are atomic
+1: PASS disabled captions retain ownership
+1: PASS uncaptioned clips can split
+1: PASS every split preserves exact active-word coverage
+1: PASS successful batch increments revision once
+1: PASS invalid input rejected by projection
+1: PASS revision exhaustion does not wrap
+1: PASS source trim cannot invent unavailable handles
+1: 20/20 contract cases passed
+1/1 Test #1: media_document_contracts .........   Passed    0.05 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.05 sec
