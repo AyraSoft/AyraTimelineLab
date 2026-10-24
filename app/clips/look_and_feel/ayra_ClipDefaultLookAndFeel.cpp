@@ -271,10 +271,15 @@ void ClipDefaultLookAndFeel::drawAudioClip (
     bodyPath.addRoundedRectangle (v.bounds, corner);
 
     // 1. Fondo della Clip (vibrante e pulito, senza fascia scura artificiale in cima)
-    const auto topCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.35f)
-                                   : tint.withAlpha (0.92f);
-    const auto botCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.55f)
-                                   : tint.darker (0.25f).withAlpha (0.88f);
+    auto topCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.35f)
+                             : tint.withAlpha (0.92f);
+    auto botCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.55f)
+                             : tint.darker (0.25f).withAlpha (0.88f);
+    if (v.container.isContainer())
+    {
+        topCol = topCol.darker (0.34f);
+        botCol = botCol.darker (0.42f);
+    }
     {
         juce::ColourGradient grad (topCol, v.bounds.getX(), v.bounds.getY(),
                                    botCol, v.bounds.getX(), v.bounds.getBottom(), false);
@@ -295,8 +300,8 @@ void ClipDefaultLookAndFeel::drawAudioClip (
         const float waveformHeight = juce::jmax (
             1.0f, v.bounds.getBottom() - waveformTop - (v.features.showEnvelopePreview ? 2.0f : 0.0f));
 
-        const int numCh = juce::jmax (1, v.numChannels);
-        const float chH = waveformHeight / (float) numCh;
+        const int numCh = v.container.isContainer() ? 0 : juce::jmax (1, v.numChannels);
+        const float chH = numCh > 0 ? waveformHeight / (float) numCh : waveformHeight;
 
         for (int ch = 0; ch < numCh; ++ch)
         {
@@ -337,7 +342,8 @@ void ClipDefaultLookAndFeel::drawAudioClip (
         }
 
         // Badge formato canale a destra in basso (es. "4 ch / 4 pos")
-        if (v.channelFormatText.isNotEmpty() && v.bounds.getWidth() > 100.0f && v.bounds.getHeight() >= 42.0f)
+        if (!v.container.isContainer() && v.channelFormatText.isNotEmpty()
+            && v.bounds.getWidth() > 100.0f && v.bounds.getHeight() >= 42.0f)
         {
             g.setColour (ink.withAlpha (0.75f));
             g.setFont (tk::type::caption().withHeight (10.0f));
@@ -460,7 +466,11 @@ void ClipDefaultLookAndFeel::drawAudioClip (
         const juce::Rectangle<float> audioCurveBounds (
             v.bounds.getX(), waveformTop, v.bounds.getWidth(), waveformHeight);
         drawClipOverlapDecoration (g, v.bounds, audioCurveBounds, v.overlap);
+        for (int i = 0; i < v.numContainedClipPreviews; ++i)
+            drawAudioClip (g, v.containedClipPreviews[i], component);
+        drawContainerGainEnvelope (g, v.bounds, v.container, tint);
         drawClipStateAndAuditionOverlay (g, v.bounds, v.state, tint);
+        drawClipContainerFrame (g, v.bounds, v.container, tint);
 
         // 5. Unico inviluppo Gain: primo e ultimo punto sono anche gli
         // endpoint di fade-in/fade-out, senza una seconda curva sovrapposta.
@@ -605,10 +615,15 @@ void ClipDefaultLookAndFeel::drawMidiClip (
     bodyPath.addRoundedRectangle (v.bounds, corner);
 
     // 1. Fondo della Clip (identico a drawAudioClip per coerenza totale)
-    const auto topCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.35f)
-                                   : tint.withAlpha (0.92f);
-    const auto botCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.55f)
-                                   : tint.darker (0.25f).withAlpha (0.88f);
+    auto topCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.35f)
+                             : tint.withAlpha (0.92f);
+    auto botCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.55f)
+                             : tint.darker (0.25f).withAlpha (0.88f);
+    if (v.container.isContainer())
+    {
+        topCol = topCol.darker (0.34f);
+        botCol = botCol.darker (0.42f);
+    }
     {
         juce::ColourGradient grad (topCol, v.bounds.getX(), v.bounds.getY(),
                                    botCol, v.bounds.getX(), v.bounds.getBottom(), false);
@@ -635,7 +650,7 @@ void ClipDefaultLookAndFeel::drawMidiClip (
         const bool isInPlaceLOD = (v.zoomLod != clip_midi_law::ZoomLod::preview);
 
         // 2. Griglia Piano Roll (LOD: sopra 110px mostra corsie tasti bianchi/neri + label ottave C)
-        if (isInPlaceLOD && !v.isDrumMode)
+        if (!v.container.isContainer() && isInPlaceLOD && !v.isDrumMode)
         {
             for (int p = minPitch; p <= maxPitch; ++p)
             {
@@ -681,7 +696,7 @@ void ClipDefaultLookAndFeel::drawMidiClip (
                 }
             }
         }
-        else
+        else if (!v.container.isContainer())
         {
             // Linee di riferimento leggere per vista compatta
             g.setColour (ink.withAlpha (0.16f));
@@ -693,10 +708,14 @@ void ClipDefaultLookAndFeel::drawMidiClip (
         drawClipOverlapDecoration (
             g, v.bounds, midiLayout.pianoRollBounds, v.overlap,
             true, v.displayMinPitch, v.displayMaxPitch, v.isDrumMode, v.zoomLod);
+        for (int i = 0; i < v.numContainedClipPreviews; ++i)
+            drawMidiClip (g, v.containedClipPreviews[i], component);
+        drawContainerGainEnvelope (g, v.bounds, v.container, tint);
         drawClipStateAndAuditionOverlay (g, v.bounds, v.state, tint);
+        drawClipContainerFrame (g, v.bounds, v.container, tint);
 
         // 2c. Rendering delle Note MIDI (Pillole Melodiche o Rombi Drum Mode)
-        if (v.notes != nullptr && v.numNotes > 0)
+        if (!v.container.isContainer() && v.notes != nullptr && v.numNotes > 0)
         {
             for (int ni = 0; ni < v.numNotes; ++ni)
             {
@@ -789,7 +808,8 @@ void ClipDefaultLookAndFeel::drawMidiClip (
         }
 
         // 2d. Velocity sub-lane separata: steli allineati ai Note-On.
-        if (v.zoomLod == clip_midi_law::ZoomLod::noteAndVelocityEdit
+        if (!v.container.isContainer()
+            && v.zoomLod == clip_midi_law::ZoomLod::noteAndVelocityEdit
             && !midiLayout.velocityLaneBounds.isEmpty())
         {
             const auto lane = midiLayout.velocityLaneBounds;
@@ -1083,10 +1103,15 @@ void ClipDefaultLookAndFeel::drawLineClip (
     bodyPath.addRoundedRectangle (v.bounds, corner);
 
     // 1. Fondo della Clip (gradiente Card identico a drawAudioClip)
-    const auto topCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.35f)
-                                   : tint.withAlpha (0.92f);
-    const auto botCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.55f)
-                                   : tint.darker (0.25f).withAlpha (0.88f);
+    auto topCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.35f)
+                             : tint.withAlpha (0.92f);
+    auto botCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.55f)
+                             : tint.darker (0.25f).withAlpha (0.88f);
+    if (v.container.isContainer())
+    {
+        topCol = topCol.darker (0.34f);
+        botCol = botCol.darker (0.42f);
+    }
     {
         juce::ColourGradient grad (topCol, v.bounds.getX(), v.bounds.getY(),
                                    botCol, v.bounds.getX(), v.bounds.getBottom(), false);
@@ -1201,10 +1226,16 @@ void ClipDefaultLookAndFeel::drawLineClip (
         }
 
         drawClipOverlapDecoration (g, v.bounds, bodyArea, v.overlap);
+        for (int i = 0; i < v.numContainedClipPreviews; ++i)
+            drawLineClip (g, v.containedClipPreviews[i], component);
+        drawContainerGainEnvelope (g, v.bounds, v.container, tint);
         drawClipStateAndAuditionOverlay (g, v.bounds, v.state, tint);
+        drawClipContainerFrame (g, v.bounds, v.container, tint);
 
         // 4. Inviluppo Linea: motore unificato con la policy della clip.
-        if ((v.features.showGainEnvelope || v.features.showEnvelopePreview) && v.points != nullptr && v.numPoints >= 2)
+        if (!v.container.isContainer()
+            && (v.features.showGainEnvelope || v.features.showEnvelopePreview)
+            && v.points != nullptr && v.numPoints >= 2)
         {
             if (v.renderMode == LineClipRenderMode::gateBlock)
             {

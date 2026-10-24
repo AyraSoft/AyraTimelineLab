@@ -42,7 +42,23 @@ public:
     { laf.drawVMeter(g,r,value); }
 private: LabLookAndFeel& laf;
 };
-using PanelCanvasStates=std::map<std::pair<panel::Id,panel::VisualKind>,std::shared_ptr<void>>;
+struct PanelCanvasStateEntry
+{
+    std::shared_ptr<void> state;
+    std::uint64_t version=0;
+};
+using PanelCanvasStates=std::map<std::pair<panel::Id,panel::VisualKind>,PanelCanvasStateEntry>;
+
+std::vector<ClipSplitView> projectClipSplits(const Session& session,const panel::Id& laneId)
+{
+    std::vector<ClipSplitView> result;
+    if(!session.panelMetadata)return result;
+    for(const auto& split:session.panelMetadata->splitLineage)
+        if(split.left.lane==laneId&&split.right.lane==laneId)
+            result.push_back({split.left.clip,split.right.clip,static_cast<float>(split.fraction)});
+    return result;
+}
+
 template<class Canvas>
 panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent& legacy,
                                   PanelCanvasStates& states,const panel::Lane& sourceLane)
@@ -51,11 +67,23 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
                ||requires(const Canvas& c){c.containsPanelClipAt(juce::Point<float>{});},
                   "Every canvas must expose its real editable-content hit geometry");
     auto* raw=component.get();const auto key=std::make_pair(sourceLane.id,sourceLane.visual);
+    auto appliedStateVersion=std::make_shared<std::uint64_t>(0);
     raw->panelView.cycleHeight=[&legacy, id=sourceLane.id]{if(legacy.onPanelHeightCycle)legacy.onPanelHeightCycle(id);};
-    raw->panelView.prepareTemporalGroup=[&legacy,id=sourceLane.id](const std::string& clip){
-        return legacy.onPrepareTemporalGroup?legacy.onPrepareTemporalGroup(id,clip):std::function<void(bool)>{};
+    raw->panelView.prepareGlue=[&legacy,id=sourceLane.id](const std::string& clip){
+        return legacy.onPrepareGlue?legacy.onPrepareGlue(id,clip):std::function<void()>{};
     };
-    if(const auto it=states.find(key);it!=states.end())raw->restorePanelState(it->second);
+    raw->panelView.openContainerEditor=[&legacy,&states,key,raw,appliedStateVersion,id=sourceLane.id](const std::string& clip,
+        juce::Component& source,juce::Rectangle<int> anchor)
+    {
+        auto& entry=states[key];
+        if(entry.state&&entry.version!=*appliedStateVersion)
+        {raw->restorePanelState(entry.state);*appliedStateVersion=entry.version;}
+        entry.state=raw->capturePanelState();++entry.version;
+        *appliedStateVersion=entry.version;
+        if(legacy.onOpenClipContainer)legacy.onOpenClipContainer(id,clip,source,anchor);
+    };
+    if(const auto it=states.find(key);it!=states.end()&&it->second.state)
+    {raw->restorePanelState(it->second.state);*appliedStateVersion=it->second.version;}
     panel::LaneCanvas result;
     if constexpr(requires {raw->containsPanelEditableAt(juce::Point<float>{});})
         result.containsEditableAt=[raw](juce::Point<float> point){return raw->containsPanelEditableAt(point);};
@@ -65,7 +93,9 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
         result.preferredHeight=[raw](int width){return raw->preferredPanelHeight(width);};
     if constexpr(requires {raw->onPanelContentChanged;})
         result.setContentChangeListener=[raw](std::function<void()> listener){raw->onPanelContentChanged=std::move(listener);};
-    result.saveState=[raw,&states,key]{states[key]=raw->capturePanelState();};
+    result.saveState=[raw,&states,key,appliedStateVersion]{auto& entry=states[key];
+        if(entry.state&&entry.version!=*appliedStateVersion)return;
+        entry.state=raw->capturePanelState();++entry.version;*appliedStateVersion=entry.version;};
     result.hasInteraction=[raw]{
         bool pending=false;
         if constexpr(requires{raw->hasPendingPanelGroupGesture();})pending=raw->hasPendingPanelGroupGesture();
@@ -73,10 +103,17 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
     };
     if constexpr(requires {raw->panelEventTimes();})result.eventTimes=[raw]{return raw->panelEventTimes();};
     auto window=std::make_shared<PanelClipWindow>();
-    result.bind=[raw,&legacy,window](const panel::Lane& lane,const panel::CanvasFrame& frame)
+    result.bind=[raw,&legacy,&states,key,appliedStateVersion,window](const panel::Lane& lane,const panel::CanvasFrame& frame)
     {
+        if(const auto saved=states.find(key);saved!=states.end()&&saved->second.state
+            &&saved->second.version!=*appliedStateVersion)
+        {raw->restorePanelState(saved->second.state);*appliedStateVersion=saved->second.version;}
         raw->panelView.enabled=true;raw->panelView.time=frame.time;
         raw->panelView.selected=frame.selected;raw->panelView.ownerColour=juce::Colour(frame.ownerColour);
+        if(raw->panelView.documentProjectionRevision!=frame.revision) {
+            raw->panelView.clipSplits=projectClipSplits(legacy.store().state(),lane.id);
+            raw->panelView.documentProjectionRevision=frame.revision;
+        }
         if constexpr(requires {raw->setWarpFeatureEnabled(true);})raw->setWarpFeatureEnabled(legacy.isWarpFeatureEnabled());
         if constexpr(requires {raw->setGainFeatureEnabled(true);})raw->setGainFeatureEnabled(legacy.isGainFeatureEnabled());
         if constexpr(requires {raw->setOverlayFeatureEnabled(true);})raw->setOverlayFeatureEnabled(legacy.isGainFeatureEnabled());
@@ -86,6 +123,17 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
             else {
                 window->update(*source,frame.revision);raw->panelView.canonicalClipIds=window->canonicalIds;
                 auto wanted=window->visible(frame.time,frame.width,juce::Component::isMouseButtonDownAnywhere());
+                bool addedSplitPartner=true;
+                while(addedSplitPartner)
+                {
+                    addedSplitPartner=false;
+                    for(const auto& split:raw->panelView.clipSplits)
+                        if(wanted.contains(split.leftClipId)||wanted.contains(split.rightClipId))
+                        {
+                            addedSplitPartner=wanted.insert(split.leftClipId).second||addedSplitPartner;
+                            addedSplitPartner=wanted.insert(split.rightClipId).second||addedSplitPartner;
+                        }
+                }
                 if constexpr(requires {raw->includePanelPartners(wanted);})raw->includePanelPartners(wanted);
                 auto projection=window->projection(wanted,frame.height);raw->setModel(projection,frame.height);
             }
@@ -93,6 +141,65 @@ panel::LaneCanvas wrapPanelCanvas(std::unique_ptr<Canvas> component,LabComponent
     };
     result.component=std::move(component);return result;
 }
+
+/** Shell app-specifico del sotto-arrangement Glue. Il documento resta nello
+    Store; questo oggetto possiede soltanto il canvas temporaneo del CallOutBox. */
+class ClipContainerEditor final:public juce::Component
+{
+public:
+    ClipContainerEditor(std::unique_ptr<juce::Component> content,juce::String titleText,
+                        int expandedHeight,std::function<void(int)> bindCallback,
+                        std::function<void()> dissolveCallback,
+                        std::function<void()> closeCallback)
+        :canvas(std::move(content)),expanded(std::max(96,expandedHeight)),
+         modelHeight(expanded),bind(std::move(bindCallback)),onClose(std::move(closeCallback))
+    {
+        title.setText(std::move(titleText),juce::dontSendNotification);
+        title.setFont(juce::Font(juce::FontOptions().withHeight(12.0f)).boldened());
+        title.setJustificationType(juce::Justification::centredLeft);
+        hint.setText("Doppio click sul corpo di un Glue: entra nel livello successivo. Header: altezza.",
+                     juce::dontSendNotification);
+        hint.setFont(juce::Font(juce::FontOptions().withHeight(10.0f)));
+        hint.setJustificationType(juce::Justification::centredRight);
+        dissolve.setTooltip("Scioglie questo Glue e ripristina le clip nella lane che lo contiene.");
+        dissolve.onClick=std::move(dissolveCallback);
+        addAndMakeVisible(title);addAndMakeVisible(hint);addAndMakeVisible(dissolve);addAndMakeVisible(*canvas);
+        setSize(780,expanded+38);refresh();
+    }
+    ~ClipContainerEditor() override {disconnectHost(true);}
+    void disconnectHost(const bool persistState)
+    {
+        canvas->setLookAndFeel(nullptr);bind={};dissolve.onClick={};
+        auto close=std::move(onClose);onClose={};
+        if(persistState&&close)close();
+    }
+    void refresh(){if(bind)bind(modelHeight);repaint();}
+    void cycleHeight()
+    {
+        modelHeight=modelHeight<=32?expanded:32;
+        setSize(getWidth(),modelHeight+38);resized();refresh();
+    }
+    void resized()override
+    {
+        auto area=getLocalBounds();auto header=area.removeFromTop(34).reduced(8,2);
+        title.setBounds(header.removeFromLeft(std::min(260,header.getWidth()/2)));
+        dissolve.setBounds(header.removeFromRight(112).reduced(2));
+        hint.setBounds(header);canvas->setBounds(area.reduced(4));
+    }
+    void paint(juce::Graphics& g)override
+    {
+        g.fillAll(juce::Colour(0xff0d1218));
+        g.setColour(juce::Colour(0xff27313c));g.drawRect(getLocalBounds(),1);
+    }
+private:
+    std::unique_ptr<juce::Component> canvas;
+    juce::Label title,hint;
+    juce::TextButton dissolve{"Sciogli Glue"};
+    int expanded=280,modelHeight=280;
+    std::function<void(int)> bind;
+    std::function<void()> onClose;
+};
+
 class TimelinePanelDemo final:public juce::Component,private juce::AsyncUpdater
 {
     friend struct CanvasContractAccess;
@@ -107,6 +214,10 @@ public:
         bridge=std::make_unique<PanelFixtureHost>(legacy.store());
         bridge->onChanged=[this]{triggerAsyncUpdate();};
         bridge->onOpenOwner=[this](const auto& id){openOwner(id);};
+        legacy.onSplitClip=[this](const std::string& lane,const std::string& clip,double time)
+        {
+            auto split=bridge->splitClip(lane,clip,time);report(split.result);return split.rightClipId;
+        };
         controller.onCommand=[this](const panel::Command& c){return bridge->apply(c);};
         const auto initial=controller.adopt(surfaceSnapshot());
         if(!initial)throw std::invalid_argument(initial.message);
@@ -128,26 +239,32 @@ public:
         surface->onSeek=[this](double){updateStatus();}; // No transport or audio engine in this showcase.
         addAndMakeVisible(*surface);setLookAndFeel(&legacy.look());
         legacy.onTimelineContextMenuRequested=[this](const clips::TimelinePointerContext& c){clipMenu(c);};
-        legacy.onPrepareTemporalGroup=[this](const std::string& lane,const std::string& clip){
+        legacy.onPrepareGlue=[this](const std::string& lane,const std::string& clip){
             const auto snapshot=bridge->snapshot();
             auto selected=selectedEvents;
-            return std::function<void(bool)>{[safe=juce::Component::SafePointer<TimelinePanelDemo>(this),
-                lane,clip,selected=std::move(selected),session=snapshot.session,revision=snapshot.revision](bool all){
+            return std::function<void()>{[safe=juce::Component::SafePointer<TimelinePanelDemo>(this),
+                lane,clip,selected=std::move(selected),session=snapshot.session,revision=snapshot.revision]{
                 if(!safe)return;
                 const auto current=safe->bridge->snapshot();
                 if(current.session!=session || current.revision!=revision) {
                     safe->report(panel::Result::fail("Documento cambiato durante il gesto Glue: operazione annullata"));return;
                 }
                 std::vector<panel::EventRef> targets;
-                auto result=panel::temporalGroupTargets(current,lane,clip,selected,all,targets);
+                auto result=panel::glueContainerTargets(current,lane,clip,selected,targets);
                 if(result) {
-                    panel::Command c;c.kind=panel::CommandKind::temporalGroup;
+                    panel::Command c;c.kind=panel::CommandKind::glueClips;
                     c.session=session;c.revision=revision;c.events=targets;
                     result=safe->bridge->apply(c);
-                    if(result){safe->selectedEvents=std::move(targets);safe->message="Gruppo orizzontale creato (Undo disponibile)";}
+                    if(result){safe->selectedEvents={{lane,safe->legacy.store().state().selectedClip}};
+                        safe->message="Container Glue creato (Undo disponibile)";}
                 }
                 safe->report(result);
             }};
+        };
+        legacy.onOpenClipContainer=[this](const std::string& lane,const std::string& clip,
+                                          juce::Component& source,juce::Rectangle<int> anchor)
+        {
+            openContainerEditor(lane,clip,source.localAreaToGlobal(anchor));
         };
         addButton(structured,[this]{changeMode(panel::Mode::structured);});
         addButton(free,[this]{changeMode(panel::Mode::freeLanes);});
@@ -158,8 +275,8 @@ public:
         addButton(theme,[this]{dark=!dark;applyStyle();});
         addButton(visibility,[this]{surface->showVisibilityMenu(visibility);});
         addButton(chooseClips,[this]{chooseEvents();});
-        addButton(groupClips,[this]{edit(panel::CommandKind::temporalGroup);});
-        addButton(dissolve,[this]{edit(panel::CommandKind::dissolveGroup);});
+        addButton(groupClips,[this]{edit(panel::CommandKind::glueClips);});
+        addButton(dissolve,[this]{edit(panel::CommandKind::dissolveContainer);});
         addButton(link,[this]{edit(panel::CommandKind::linkClips);});
         addButton(unlink,[this]{edit(panel::CommandKind::unlinkClips);});
         addButton(undoEdit,[this]{legacy.store().undo();});
@@ -174,14 +291,18 @@ public:
         search.setTextToShowWhenEmpty("Trova traccia o lane...",juce::Colour(0xff8b939f));
         search.onTextChange=[this]{findLane();};addAndMakeVisible(search);
         status.setFont(juce::Font(juce::FontOptions().withHeight(11.0f)));addAndMakeVisible(status);
-        groupClips.setTooltip("Gruppo temporale reversibile nella stessa lane. NON esegue un Glue PCM.");
+        groupClips.setTooltip("Crea un container Glue editabile e annidabile nella stessa lane.");
         link.setTooltip("Link esplicito delle clip selezionate cross-lane: timing condiviso, gain/fade indipendenti");
         chooseClips.setTooltip("Selezione cross-lane per identita'; disponibile anche dal menu contestuale della clip");
         applyStyle();updateFeatures();updateStatus();setSize(1480,1000);
     }
     ~TimelinePanelDemo() override
     {
-        cancelPendingUpdate();legacy.onTimelineContextMenuRequested=nullptr;legacy.onPrepareTemporalGroup=nullptr;legacy.onPanelHeightCycle={};
+        if(activeContainerEditor)activeContainerEditor->disconnectHost(false);
+        if(activeContainerCallout)activeContainerCallout->dismiss();
+        cancelPendingUpdate();legacy.onTimelineContextMenuRequested=nullptr;legacy.onPrepareGlue=nullptr;
+        legacy.onOpenClipContainer=nullptr;
+        legacy.onSplitClip=nullptr;legacy.onPanelHeightCycle={};
         surface.reset();bridge.reset();setLookAndFeel(nullptr);
     }
     void resized()override
@@ -212,9 +333,12 @@ private:
     panel::Controller controller;
     std::unique_ptr<PanelFixtureHost> bridge;
     std::unique_ptr<panel::TimelinePanel> surface;
+    juce::Component::SafePointer<ClipContainerEditor> activeContainerEditor;
+    juce::Component::SafePointer<juce::CallOutBox> activeContainerCallout;
+    panel::Id activeContainerLane,activeContainerId;
     juce::TextButton structured{"Struttura"},free{"Lane libere"},groupLanes{"Gruppo lane"},ungroupLanes{"Sciogli lane"};
     juce::TextButton undoView{"Undo vista"},redoView{"Redo vista"},theme{"Tema"};
-    juce::TextButton chooseClips{"Clip..."},groupClips{"Group tempo"},dissolve{"Dissolve"},link{"Link clip"},unlink{"Unlink"};
+    juce::TextButton chooseClips{"Clip..."},groupClips{"Glue clip"},dissolve{"Dissolve"},link{"Link clip"},unlink{"Unlink"};
     juce::TextButton undoEdit{"Undo edit"},redoEdit{"Redo edit"},colours{"Colori tipo"},warp{"Warp"},gain{"Gain"};
     juce::TextButton visibility{"Visibilita"};
     juce::Slider zoom;juce::TextEditor search;juce::Label status;
@@ -260,8 +384,148 @@ private:
         }
         result.supportsDocumentEvents=false;return result;
     }
+    std::function<void()> prepareNestedGlue(const panel::Id& laneId,
+                                            const panel::Id& parentContainerId,
+                                            const panel::Id& clickedClipId)
+    {
+        const auto before=bridge->snapshot();
+        return [safe=juce::Component::SafePointer<TimelinePanelDemo>(this),laneId,
+                parentContainerId,clickedClipId,session=before.session,
+                revision=before.revision]
+        {
+            if(!safe)return;
+            const auto current=safe->bridge->snapshot();
+            if(current.session!=session||current.revision!=revision)
+            {safe->report(panel::Result::fail("Documento cambiato durante il gesto Glue"));return;}
+            const auto* track=findTrack(safe->legacy.store().state(),laneId);
+            const auto* parent=track?findClip(*track,parentContainerId):nullptr;
+            if(parent==nullptr||!parent->isContainer())
+            {safe->report(panel::Result::fail("Container Glue non disponibile"));return;}
+            std::vector<panel::EventRef> targets;
+            const auto clicked=std::find_if(parent->children.begin(),parent->children.end(),
+                [&](const auto& child){return child.id==clickedClipId;});
+            if(clicked!=parent->children.end())
+            {
+                targets.push_back({laneId,clicked->id});
+                if(std::next(clicked)!=parent->children.end())targets.push_back({laneId,std::next(clicked)->id});
+            }
+            if(targets.size()<2)
+            {safe->report(panel::Result::fail("Glue richiede almeno due clip sorelle"));return;}
+            panel::Command command;command.kind=panel::CommandKind::glueClips;
+            command.session=session;command.revision=revision;command.events=std::move(targets);
+            const auto result=safe->bridge->apply(command);
+            if(result)safe->message="Glue annidato creato";
+            safe->report(result);
+        };
+    }
+    void dissolveOpenContainer(const panel::Id& laneId,
+                               const panel::Id& containerId)
+    {
+        const auto& state=legacy.store().state();
+        const auto* track=findTrack(state,laneId);
+        const auto* container=track?findClip(*track,containerId):nullptr;
+        if(container==nullptr||!container->isContainer())
+        {report(panel::Result::fail("Container Glue non disponibile"));return;}
+        const auto snapshot=bridge->snapshot();panel::Command command;
+        command.kind=panel::CommandKind::dissolveContainer;command.session=snapshot.session;
+        command.revision=snapshot.revision;command.events={{laneId,containerId}};
+        const auto result=bridge->apply(command);if(result)message="Glue sciolto";report(result);
+    }
+    template<class Canvas>
+    std::unique_ptr<ClipContainerEditor> makeContainerEditor(
+        std::unique_ptr<Canvas> canvas,const panel::Lane& lane,
+        const panel::Id& containerId,const int expandedHeight)
+    {
+        auto* raw=canvas.get();const auto key=std::make_pair(lane.id,lane.visual);
+        raw->setLookAndFeel(&legacy.look());
+        if(const auto saved=canvasStates.find(key);saved!=canvasStates.end()&&saved->second.state)
+            raw->restorePanelState(saved->second.state);
+        raw->panelView.enabled=true;
+        raw->panelView.prepareGlue=[safe=juce::Component::SafePointer<TimelinePanelDemo>(this),
+            laneId=lane.id,containerId](const std::string& clicked)
+        {
+            return safe?safe->prepareNestedGlue(laneId,containerId,clicked):std::function<void()>{};
+        };
+        raw->panelView.openContainerEditor=[safe=juce::Component::SafePointer<TimelinePanelDemo>(this),
+            laneId=lane.id](const std::string& nested,juce::Component& source,juce::Rectangle<int> anchor)
+        {
+            if(!safe)return;
+            const auto screenAnchor=source.localAreaToGlobal(anchor);
+            juce::MessageManager::callAsync([safe,laneId,nested,screenAnchor]
+            {if(safe)safe->openContainerEditor(laneId,nested,screenAnchor);});
+        };
+        auto bind=[safe=juce::Component::SafePointer<TimelinePanelDemo>(this),raw,
+                   laneId=lane.id,containerId](const int modelHeight)
+        {
+            if(!safe)return;
+            const auto* source=findTrack(safe->legacy.store().state(),laneId);
+            const auto* container=source?findClip(*source,containerId):nullptr;
+            if(source==nullptr||container==nullptr||!container->isContainer())return;
+            Track projection=*source;projection.clips=container->children;projection.height=modelHeight;
+            double duration=0.125;
+            auto ids=std::make_shared<std::unordered_set<std::string>>();
+            for(const auto& child:projection.clips)
+                duration=std::max(duration,child.start+child.length);
+            for(const auto& root:source->clips)
+            {
+                std::vector<std::string> nestedIds;collectClipIds(root,nestedIds);
+                ids->insert(nestedIds.begin(),nestedIds.end());
+            }
+            raw->panelView.time={0.0,std::max(1.0,static_cast<double>(raw->getWidth()-8)/duration),0.0};
+            raw->panelView.ownerColour=juce::Colour(source->colour);
+            raw->panelView.canonicalClipIds=std::move(ids);
+            raw->panelView.documentProjectionRevision=safe->bridge->snapshot().revision;
+            raw->panelView.clipSplits=projectClipSplits(safe->legacy.store().state(),laneId);
+            if constexpr(requires {raw->setWarpFeatureEnabled(true);})raw->setWarpFeatureEnabled(safe->legacy.isWarpFeatureEnabled());
+            if constexpr(requires {raw->setGainFeatureEnabled(true);})raw->setGainFeatureEnabled(safe->legacy.isGainFeatureEnabled());
+            if constexpr(requires {raw->setOverlayFeatureEnabled(true);})raw->setOverlayFeatureEnabled(safe->legacy.isGainFeatureEnabled());
+            raw->setModel(projection,modelHeight);
+        };
+        auto save=[safe=juce::Component::SafePointer<TimelinePanelDemo>(this),raw,key]
+        {
+            raw->setLookAndFeel(nullptr);
+            if(!safe)return;
+            auto& entry=safe->canvasStates[key];entry.state=raw->capturePanelState();++entry.version;
+            if(safe->surface){safe->surface->invalidateCanvasFrames();safe->surface->refresh();}
+        };
+        auto dissolve=[safe=juce::Component::SafePointer<TimelinePanelDemo>(this),
+                       laneId=lane.id,containerId]
+        {if(safe)safe->dissolveOpenContainer(laneId,containerId);};
+        auto editor=std::make_unique<ClipContainerEditor>(std::move(canvas),
+            "Dentro Glue / "+panel::text(containerId),expandedHeight,std::move(bind),
+            std::move(dissolve),std::move(save));
+        raw->panelView.cycleHeight=[safe=juce::Component::SafePointer<ClipContainerEditor>(editor.get())]
+        {if(safe)safe->cycleHeight();};
+        return editor;
+    }
+    void openContainerEditor(const panel::Id& laneId,const panel::Id& containerId,
+                             const juce::Rectangle<int> screenAnchor)
+    {
+        const auto* track=findTrack(legacy.store().state(),laneId);
+        const auto* container=track?findClip(*track,containerId):nullptr;
+        const auto* lane=controller.lane(laneId);
+        if(container==nullptr||!container->isContainer()||lane==nullptr)
+        {report(panel::Result::fail("La clip selezionata non e' un container Glue"));return;}
+        if(activeContainerCallout)activeContainerCallout->dismiss();
+        std::unique_ptr<ClipContainerEditor> editor;
+        using V=panel::VisualKind;
+        if(lane->visual==V::audio)editor=makeContainerEditor(std::make_unique<AudioClipCanvas>(legacy),*lane,containerId,300);
+        else if(lane->visual==V::midi)editor=makeContainerEditor(std::make_unique<MidiClipCanvas>(legacy),*lane,containerId,400);
+        else if(lane->visual==V::image)editor=makeContainerEditor(std::make_unique<ImageClipCanvas>(legacy),*lane,containerId,300);
+        else if(lane->visual==V::line)editor=makeContainerEditor(std::make_unique<LineClipCanvas>(legacy,
+            timeline_visual_style::CurveLineColourVariant::light,TimelineCurveUnderlayStyle::darkBelow),*lane,containerId,300);
+        if(!editor){report(panel::Result::fail("Questo tipo di lane non supporta clip Glue"));return;}
+        auto* editorPtr=editor.get();
+        auto& callout=juce::CallOutBox::launchAsynchronously(std::move(editor),screenAnchor,nullptr);
+        activeContainerEditor=editorPtr;activeContainerCallout=&callout;
+        activeContainerLane=laneId;activeContainerId=containerId;
+    }
     void updateFeatures()
-    { surface->invalidateCanvasFrames();warp.setToggleState(warpOn,juce::dontSendNotification);gain.setToggleState(gainOn,juce::dontSendNotification); }
+    {
+        surface->invalidateCanvasFrames();
+        if(activeContainerEditor)activeContainerEditor->refresh();
+        warp.setToggleState(warpOn,juce::dontSendNotification);gain.setToggleState(gainOn,juce::dontSendNotification);
+    }
     void handleAsyncUpdate()override
     {
         const auto adopted=controller.adopt(surfaceSnapshot());
@@ -275,8 +539,14 @@ private:
                 if(old!=previousLegacyHeights.end() && old->second!=t->height)controller.setHeight(lane.id,t->height);
                 previousLegacyHeights[lane.id]=t->height;
             }
+        if(!legacy.store().lastError().empty())message=legacy.store().lastError();
         std::erase_if(selectedEvents,[this](const auto& ref){return controller.event(ref)==nullptr;});
-        surface->refresh();updateStatus();
+        surface->refresh();
+        const auto* activeTrack=findTrack(legacy.store().state(),activeContainerLane);
+        const auto* active=activeTrack?findClip(*activeTrack,activeContainerId):nullptr;
+        if(activeContainerEditor&&active&&active->isContainer())activeContainerEditor->refresh();
+        else if(activeContainerCallout)activeContainerCallout->dismiss();
+        updateStatus();
     }
     void applyStyle()
     {
@@ -338,7 +608,11 @@ private:
     }
     void edit(panel::CommandKind kind)
     {
-        const auto result=controller.edit(kind,selectedEvents);if(result)message="Comando inviato come una transazione fixture";report(result);
+        auto targets=selectedEvents;
+        if(kind==panel::CommandKind::dissolveContainer&&targets.empty())
+            for(const auto& event:controller.snapshot().events)
+                if(event.ref.clip==legacy.store().state().selectedClip){targets.push_back(event.ref);break;}
+        const auto result=controller.edit(kind,targets);if(result)message="Comando inviato come una transazione fixture";report(result);
     }
     void chooseEvents()
     {

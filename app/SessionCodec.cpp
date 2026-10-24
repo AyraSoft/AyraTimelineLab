@@ -43,10 +43,38 @@ std::vector<std::string> readStrings(const juce::var& v,const char* key)
     std::vector<std::string> out;
     for(const auto& value:array(v,key,256)){if(!value.isString())throw std::runtime_error("ID non testuale");out.push_back(value.toString().toStdString());}return out;
 }
+juce::var encodeClip(const Clip& clip)
+{
+    auto value=object();put(value,"id",utf8(clip.id));put(value,"name",utf8(clip.name));
+    put(value,"start",clip.start);put(value,"length",clip.length);
+    put(value,"channels",clip.channels);put(value,"seed",clip.seed);
+    put(value,"fadeIn",clip.fadeIn);put(value,"fadeOut",clip.fadeOut);
+    put(value,"container",clip.container);
+    juce::Array<juce::var> children;
+    for(const auto& child:clip.children)children.add(encodeClip(child));
+    put(value,"children",children);
+    return value;
+}
+Clip decodeClip(const juce::var& value,const int schemaVersion,const int depth)
+{
+    if(depth>16)throw std::runtime_error("Profondita' container eccessiva");
+    Clip clip{text(value,"id"),text(value,"name"),number(value,"start"),
+              number(value,"length"),integer(value,"channels"),
+              integer(value,"seed"),number(value,"fadeIn"),number(value,"fadeOut")};
+    const auto* objectValue=value.getDynamicObject();
+    clip.container=schemaVersion>=3?flag(value,"container"):false;
+    if(objectValue!=nullptr&&objectValue->hasProperty("children"))
+        for(const auto& child:array(value,"children",64))
+            clip.children.push_back(decodeClip(child,schemaVersion,depth+1));
+    else if(schemaVersion>=2)
+        throw std::runtime_error("Campo mancante: children");
+    if(schemaVersion<3)clip.container=!clip.children.empty();
+    return clip;
+}
 }
 juce::String encodeSession(const Session& s)
 {
-    auto root=object();put(root,"schema","ayra-timeline-lab/1");put(root,"songId",utf8(s.songId));put(root,"mode",s.mode==Mode::grouped?"grouped":"free");
+    auto root=object();put(root,"schema","ayra-timeline-lab/3");put(root,"songId",utf8(s.songId));put(root,"mode",s.mode==Mode::grouped?"grouped":"free");
     put(root,"dark",s.dark);put(root,"headerWidth",s.headerWidth);put(root,"groupCollapsed",s.groupCollapsed);put(root,"zoom",s.zoom);
     put(root,"selected",strings(s.selected));put(root,"active",utf8(s.active));put(root,"selectedClip",utf8(s.selectedClip));put(root,"manualOrder",strings(s.manualOrder));
     juce::Array<juce::var> tracks;
@@ -58,10 +86,7 @@ juce::String encodeSession(const Session& s)
         put(v,"expanded",t.expanded);put(v,"pinned",t.pinned);put(v,"mute",t.mute);put(v,"solo",t.solo);put(v,"enabled",t.enabled);put(v,"bypass",t.bypass);put(v,"buffer",t.buffer);put(v,"oversample",t.oversample);put(v,"gain",t.gain);put(v,"pan",t.pan);
         juce::Array<juce::var> order;for(int x:t.order)order.add(x);put(v,"order",order);
         juce::Array<juce::var> clips;
-        for(const auto& c:t.clips)
-        {
-            auto cv=object();put(cv,"id",utf8(c.id));put(cv,"name",utf8(c.name));put(cv,"start",c.start);put(cv,"length",c.length);put(cv,"channels",c.channels);put(cv,"seed",c.seed);put(cv,"fadeIn",c.fadeIn);put(cv,"fadeOut",c.fadeOut);clips.add(cv);
-        }
+        for(const auto& c:t.clips)clips.add(encodeClip(c));
         put(v,"clips",clips);tracks.add(v);
     }
     put(root,"tracks",tracks);return juce::JSON::toString(root,false);
@@ -72,7 +97,11 @@ juce::Result decodeSession(const juce::String& input,Session& destination)
     juce::var root;auto parsed=juce::JSON::parse(input,root);if(parsed.failed())return parsed;
     try
     {
-        if(text(root,"schema")!="ayra-timeline-lab/1")return juce::Result::fail("Formato Lab non supportato");
+        const auto schema=text(root,"schema");
+        if(schema!="ayra-timeline-lab/1"&&schema!="ayra-timeline-lab/2"
+           &&schema!="ayra-timeline-lab/3")
+            return juce::Result::fail("Formato Lab non supportato");
+        const int schemaVersion=schema.ends_with("/3")?3:(schema.ends_with("/2")?2:1);
         Session s;s.songId=text(root,"songId");const auto mode=text(root,"mode");
         if(mode!="grouped"&&mode!="free")return juce::Result::fail("Modalita' sconosciuta");
         s.mode=mode=="grouped"?Mode::grouped:Mode::free;s.dark=flag(root,"dark");s.groupCollapsed=flag(root,"groupCollapsed");s.headerWidth=integer(root,"headerWidth");s.zoom=number(root,"zoom");
@@ -88,9 +117,7 @@ juce::Result decodeSession(const juce::String& input,Session& destination)
             t.expanded=flag(v,"expanded");t.pinned=flag(v,"pinned");t.mute=flag(v,"mute");t.solo=flag(v,"solo");t.enabled=flag(v,"enabled");t.bypass=flag(v,"bypass");t.buffer=flag(v,"buffer");t.oversample=flag(v,"oversample");t.gain=number(v,"gain");t.pan=number(v,"pan");
             for(const auto& x:array(v,"order",64)){if(!x.isInt())return juce::Result::fail("Indice canale non intero");t.order.push_back(static_cast<int>(x));}
             for(const auto& cv:array(v,"clips",64))
-            {
-                Clip c;c.id=text(cv,"id");c.name=text(cv,"name");c.start=number(cv,"start");c.length=number(cv,"length");c.channels=integer(cv,"channels");c.seed=integer(cv,"seed");c.fadeIn=number(cv,"fadeIn");c.fadeOut=number(cv,"fadeOut");t.clips.push_back(std::move(c));
-            }
+                t.clips.push_back(decodeClip(cv,schemaVersion,0));
             s.tracks.push_back(std::move(t));
         }
         const auto error=validate(s);if(!error.empty())return juce::Result::fail(utf8(error));

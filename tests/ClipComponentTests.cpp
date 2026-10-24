@@ -1595,6 +1595,116 @@ int main()
             }
         }
 
+        // 16. I Warp/Gain dei container compongono ricorsivamente la preview,
+        // preservando i vuoti del sotto-arrangement.
+        {
+            struct PreviewClip
+            {
+                std::string id;
+                double start = 0.0;
+                double length = 1.0;
+                bool container = false;
+                std::vector<PreviewClip> children;
+                [[nodiscard]] bool isContainer() const noexcept { return container; }
+            };
+
+            PreviewClip root { "root", 0.0, 10.0, true, {
+                { "left", 0.0, 2.0, false, {} },
+                { "nested", 6.0, 4.0, true, {
+                    { "inside", 1.0, 1.0, false, {} }
+                } }
+            } };
+            std::vector<NestedClipPlacement> placements;
+            buildNestedClipPlacements(
+                root, { 0.0f, 0.0f, 1000.0f, 100.0f }, placements,
+                [] (const PreviewClip& clip, const float sourceNorm) noexcept
+                {
+                    if (clip.id == "root")
+                        return mapNormalizedWarp(sourceNorm, { 0.5f }, { 0.25f });
+                    if (clip.id == "nested")
+                        return mapNormalizedWarp(sourceNorm, { 0.5f }, { 0.75f });
+                    return sourceNorm;
+                },
+                [] (const PreviewClip& clip, const float) noexcept
+                {
+                    return clip.id == "root" ? 0.5f
+                         : clip.id == "nested" ? 0.25f : 1.0f;
+                });
+
+            require(placements.size() == 3,
+                    "nested container projection must retain every child exactly once");
+            require(placements[0].bounds.getRight() < placements[1].bounds.getX(),
+                    "container projection must preserve the source gap after warp");
+            require(std::abs(placements[0].transform.mapTime(0.5f) - 0.5f) < 0.001f,
+                    "a child inside one linear warp segment must remain internally linear");
+            require(std::abs(placements[2].transform.gainAt(0.5f) - 0.125f) < 0.001f,
+                    "nested container gain must multiply through every ancestor");
+            require(placements[2].bounds.getX() >= placements[1].bounds.getX()
+                    && placements[2].bounds.getRight() <= placements[1].bounds.getRight(),
+                    "recursive warp must keep a grandchild inside its container preview");
+
+            require(std::abs(mapNormalizedWarp(0.25f, { 0.5f }, { 0.25f }) - 0.125f) < 0.001f,
+                    "normalized warp must interpolate source to destination anchors");
+            require(std::abs(mapNormalizedWarp(0.25f, { 0.5f }, { 0.0f }) - 0.25f) < 0.001f,
+                    "invalid crossing warp data must degrade to identity");
+
+            auto gainPoints = makeDefaultContainerGainEnvelope();
+            require(std::abs(evaluateContainerGainScale(gainPoints, 0.5f) - 1.0f) < 0.001f,
+                    "a new container gain envelope must be unity");
+
+            addContainerGainPoint(gainPoints, { 0.0f, 0.0f, 100.0f, 100.0f },
+                                  { 50.0f, 30.0f });
+            require(gainPoints.size() == 3 && gainPoints[1].selected,
+                    "double-click insertion must create one selected container gain point");
+            const auto gainBounds = containerGainCurveBounds(
+                { 0.0f, 0.0f, 100.0f, 100.0f });
+            const juce::Point<float> insertedPixel {
+                gainBounds.getX() + gainPoints[1].normX * gainBounds.getWidth(),
+                gainBounds.getBottom()
+                    - clip_gain_law::dbToNorm(gainPoints[1].gainDb)
+                        * gainBounds.getHeight()
+            };
+            const auto gainHit = hitTestContainerGainEnvelope(
+                { 0.0f, 0.0f, 100.0f, 100.0f }, gainPoints, insertedPixel);
+            require(gainHit.zone == TimelineClipZone::gainEnvelopePoint
+                        && gainHit.pointIndex == 1,
+                    "container gain hit testing must return the inserted point identity");
+
+            const auto initialGainPoints = gainPoints;
+            dragContainerGainPoint(
+                gainPoints, initialGainPoints, 1,
+                { 0.0f, 0.0f, 100.0f, 100.0f }, insertedPixel,
+                insertedPixel.translated(200.0f, -10.0f));
+            require(gainPoints[1].normX < gainPoints[2].normX
+                        && gainPoints[1].normX >= gainPoints[0].normX + 0.01f,
+                    "container gain dragging must preserve strict point ordering");
+            require(gainPoints[1].gainDb > initialGainPoints[1].gainDb,
+                    "container gain point dragging must update the outer gain");
+            require(removeContainerGainPoint(gainPoints, 1)
+                        && gainPoints.size() == 2,
+                    "an internal container gain point must be removable");
+            require(!removeContainerGainPoint(gainPoints, 0),
+                    "container gain endpoints must remain pinned");
+
+            ContainedClipTransform mediaTransform;
+            for (std::size_t i = 0; i < ContainedClipTransform::numSamples; ++i) {
+                const float u = static_cast<float>(i)
+                              / static_cast<float>(ContainedClipTransform::numSamples - 1);
+                mediaTransform.outputNorm[i] = u * 0.5f;
+                mediaTransform.gainScale[i] = 0.5f;
+            }
+            juce::Path waveform;
+            waveform.startNewSubPath(0.0f, 25.0f);
+            waveform.lineTo(1000.0f, 75.0f);
+            const auto transformed = transformContainedWaveformPath(
+                waveform, mediaTransform).getBounds();
+            require(std::abs(transformed.getWidth() - 500.0f) < 0.01f,
+                    "container warp must remap the complete audio thumbnail");
+            require(std::abs(transformed.getY() - 37.5f) < 0.01f
+                        && std::abs(transformed.getBottom() - 62.5f) < 0.01f,
+                    "container gain must scale the audio thumbnail around its centre");
+        }
+
         component.setLookAndFeel(nullptr);
         std::cout << "PASS: " << checks << " clip component assertions\n";
         return 0;

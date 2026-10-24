@@ -18,7 +18,8 @@ public:
         if(generation==revision&&full.id==source.id)return;
         std::vector<ayra::timeline::TimelineIntervalIndex::Interval> intervals;
         auto ids=std::make_shared<std::unordered_set<std::string>>();
-        byId.clear();for(std::size_t i=0;i<source.clips.size();++i){const auto& clip=source.clips[i];intervals.push_back({clip.start,clip.start+clip.length});ids->insert(clip.id);byId[clip.id]=i;}
+        byId.clear();for(std::size_t i=0;i<source.clips.size();++i){const auto& clip=source.clips[i];intervals.push_back({clip.start,clip.start+clip.length});
+            std::vector<std::string> nestedIds;collectClipIds(clip,nestedIds);ids->insert(nestedIds.begin(),nestedIds.end());byId[clip.id]=i;}
         index.reset(intervals);full=source;shell=source;shell.clips={};canonicalIds=std::move(ids);generation=revision;
     }
     std::set<std::string> visible(const ayra::timeline::TimelineTimeWindow& time,int width,bool capture)const

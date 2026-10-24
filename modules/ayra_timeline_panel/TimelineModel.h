@@ -27,7 +27,7 @@ enum class VisualKind { audio, midi, line, point, span, continuous, image };
 enum class OwnerRole { song, performer, track, convergence, songMain, global };
 enum class Monitoring { automatic, live, playback, merge };
 enum class HeightPolicy { manual, compact, automatic };
-enum class RelationKind { temporalGroup, clipLink };
+enum class RelationKind { clipLink };
 struct Capabilities
 {
     bool mute = true, solo = true, monitoring = true, open = true;
@@ -158,9 +158,7 @@ inline Result validate(const Snapshot& s)
                 return Result::fail("Missing or multiply related clip");
             scopes.insert(ref.lane);
         }
-        if (r.kind == RelationKind::temporalGroup && scopes.size() != 1)
-            return Result::fail("Temporal grouping requires one lane");
-        if (r.kind == RelationKind::clipLink && scopes.size() < 2)
+        if (scopes.size() < 2)
             return Result::fail("Vertical linking requires distinct lanes");
     }
     return {};
@@ -200,7 +198,16 @@ struct Row
     bool summary = false, firstForOwner = false;
     double bottom() const noexcept { return top + height; }
 };
-enum class CommandKind { mute, solo, monitoring, openOwner, temporalGroup, dissolveGroup,
+/** Proiezione derivata di un LayoutGroup sulla sequenza di righe visibili.
+    Il ViewState resta l'unica fonte di verita'; il paint non scandisce i gruppi. */
+struct LayoutGroupPresentation
+{
+    Id id;
+    std::size_t ordinal = 0;
+    bool joinsPrevious = false, joinsNext = false;
+    bool operator==(const LayoutGroupPresentation&) const = default;
+};
+enum class CommandKind { mute, solo, monitoring, openOwner, glueClips, dissolveContainer,
                          linkClips, unlinkClips, moveClips, trimLeft, trimRight, deleteClips, renameLane, renameOwner };
 struct Command
 {
@@ -240,6 +247,11 @@ public:
     {
         const auto i=laneRowIndex.find(id);
         return i==laneRowIndex.end()?nullptr:&layout[i->second];
+    }
+    const LayoutGroupPresentation* layoutGroupForRow(const Id& rowKey) const noexcept
+    {
+        const auto i=layoutGroupRows.find(rowKey);
+        return i==layoutGroupRows.end()?nullptr:&i->second;
     }
     double laneTop(const Id& id) const
     {
@@ -596,13 +608,13 @@ public:
             if (e->locked) return Result::fail("Locked event in selection");
             lanes.insert(ref.lane);
         }
-        if (kind == CommandKind::temporalGroup && (events.size() < 2 || lanes.size() != 1))
-            return Result::fail("Temporal group requires two clips in one lane");
+        if (kind == CommandKind::glueClips && (events.size() < 2 || lanes.size() != 1))
+            return Result::fail("Glue requires two clips in one lane");
         if (kind == CommandKind::linkClips && lanes.size() < 2)
             return Result::fail("Vertical link requires clips from distinct lanes");
         switch (kind)
         {
-            case CommandKind::temporalGroup: case CommandKind::dissolveGroup:
+            case CommandKind::glueClips: case CommandKind::dissolveContainer:
             case CommandKind::linkClips: case CommandKind::unlinkClips:
             case CommandKind::moveClips: case CommandKind::trimLeft:
             case CommandKind::trimRight: case CommandKind::deleteClips: break;
@@ -619,6 +631,7 @@ private:
     mutable std::vector<Row> layout;
     ayra::timeline::TimelineRowIndex rowIndex;
     std::unordered_map<Id,std::size_t> laneRowIndex;
+    std::unordered_map<Id,LayoutGroupPresentation> layoutGroupRows;
     std::map<Id,int> autoHeights;
     mutable bool offsetsDirty=false;
     std::uint64_t layoutEpoch=0;
@@ -630,11 +643,51 @@ private:
     }
     void finishLayout()
     {
-        std::vector<int> heights;heights.reserve(layout.size());laneRowIndex.clear();
+        std::vector<int> heights;heights.reserve(layout.size());laneRowIndex.clear();layoutGroupRows.clear();
         for(std::size_t i=0;i<layout.size();++i) {
             const auto& r=layout[i];
             if(!r.lane.empty())laneRowIndex[r.lane]=i;
             heights.push_back(!r.lane.empty() && state.hiddenLanes.contains(r.lane)?0:static_cast<int>(r.height));
+        }
+
+        struct ActiveGroup {const LayoutGroup* group=nullptr;std::size_t ordinal=0;};
+        std::unordered_map<Id,ActiveGroup> groupByUnit;
+        groupByUnit.reserve(state.layoutGroups.size()*2);
+        std::size_t ordinal=0;
+        for(const auto& group:state.layoutGroups)
+        {
+            if(group.mode!=state.mode)continue;
+            for(const auto& member:group.members)groupByUnit.emplace(member,ActiveGroup{&group,ordinal});
+            ++ordinal;
+        }
+        if(groupByUnit.empty())
+        {
+            rowIndex.reset(heights);offsetsDirty=true;++layoutEpoch;return;
+        }
+        layoutGroupRows.reserve(layout.size());
+        std::vector<std::optional<ActiveGroup>> rowGroups(layout.size());
+        for(std::size_t i=0;i<layout.size();++i)
+        {
+            if(heights[i]<=0)continue;
+            const auto& row=layout[i];
+            const auto& unit=state.mode==Mode::structured?row.owner:row.lane;
+            if(const auto found=groupByUnit.find(unit);found!=groupByUnit.end())rowGroups[i]=found->second;
+        }
+        std::optional<std::size_t> previousVisible;
+        for(std::size_t i=0;i<layout.size();++i)
+        {
+            if(heights[i]<=0)continue;
+            if(rowGroups[i])
+            {
+                LayoutGroupPresentation visual{rowGroups[i]->group->id,rowGroups[i]->ordinal};
+                if(previousVisible&&rowGroups[*previousVisible])
+                    visual.joinsPrevious=rowGroups[*previousVisible]->ordinal==rowGroups[i]->ordinal;
+                layoutGroupRows.emplace(layout[i].key,std::move(visual));
+            }
+            if(previousVisible&&rowGroups[*previousVisible]&&rowGroups[i]
+                &&rowGroups[*previousVisible]->ordinal==rowGroups[i]->ordinal)
+                layoutGroupRows.at(layout[*previousVisible].key).joinsNext=true;
+            previousVisible=i;
         }
         rowIndex.reset(heights);offsetsDirty=true;++layoutEpoch;
     }

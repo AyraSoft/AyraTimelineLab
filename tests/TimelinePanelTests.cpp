@@ -57,12 +57,10 @@ void validation()
     bad = s; bad.events[0].end = -1; CHECK(!validate(bad));
     bad = s; bad.events.push_back(bad.events[0]); CHECK(!validate(bad));
     bad = s; bad.owners[5].soloed = true; CHECK(!validate(bad));
-    bad = s; bad.relations = {{"g",RelationKind::temporalGroup,{{"a.audio","c1"},{"b.audio","c4"}}}}; CHECK(!validate(bad));
     bad = s; bad.relations = {{"l",RelationKind::clipLink,{{"a.audio","c1"},{"a.audio","c2"}}}}; CHECK(!validate(bad));
-    s.relations = {{"g",RelationKind::temporalGroup,{{"a.audio","c1"},{"a.audio","c2"}}},
-                   {"l",RelationKind::clipLink,{{"a.audio","c1"},{"a.midi","c3"}}}};
+    s.relations = {{"l",RelationKind::clipLink,{{"a.audio","c1"},{"a.midi","c3"}}}};
     CHECK(validate(s));
-    bad = s; bad.relations[1].members.push_back({"a.audio","c1"}); CHECK(!validate(bad));
+    bad = s; bad.relations[0].members.push_back({"a.audio","c1"}); CHECK(!validate(bad));
     Controller c; CHECK(c.adopt(s)); const auto count = c.rows().size();
     CHECK(!c.adopt(bad)); CHECK(c.rows().size() == count); CHECK(c.snapshot().revision == 1);
 }
@@ -87,6 +85,11 @@ void layout()
     CHECK(!c.moveBefore({"absent"},"a.audio"));
     CHECK(c.select("a.audio",Controller::Selection::replace));
     CHECK(c.select("b.audio",Controller::Selection::toggle)); CHECK(c.groupLayout("free-group"));
+    const auto* freeA=c.layoutGroupForRow("lane:a.audio");
+    const auto* freeB=c.layoutGroupForRow("lane:b.audio");
+    CHECK(freeA&&freeA->id=="free-group"&&freeA->ordinal==0&&!freeA->joinsPrevious&&freeA->joinsNext);
+    CHECK(freeB&&freeB->id=="free-group"&&freeB->ordinal==0&&freeB->joinsPrevious&&!freeB->joinsNext);
+    CHECK(!c.layoutGroupForRow("lane:a.midi"));
     CHECK(!c.groupLayout("overlap"));
     CHECK(c.moveBefore({"a.audio"},"main.audio"));
     CHECK(laneOrder(c) == std::vector<Id>({"tempo","a.midi","a.audio","b.audio","main.audio"}));
@@ -94,8 +97,15 @@ void layout()
     CHECK(c.setMode(Mode::structured));
     CHECK(c.groupLayout("track-group"));
     CHECK(c.view().layoutGroups.back().members == std::vector<Id>({"a","b"}));
+    const auto* structuredFirst=c.layoutGroupForRow("lane:a.audio");
+    const auto* structuredMiddle=c.layoutGroupForRow("lane:a.midi");
+    const auto* structuredLast=c.layoutGroupForRow("lane:b.audio");
+    CHECK(structuredFirst&&!structuredFirst->joinsPrevious&&structuredFirst->joinsNext);
+    CHECK(structuredMiddle&&structuredMiddle->joinsPrevious&&structuredMiddle->joinsNext);
+    CHECK(structuredLast&&structuredLast->joinsPrevious&&!structuredLast->joinsNext);
     CHECK(!c.moveBefore({"a.audio"},"main.audio")); // would reparent the tracks
-    CHECK(c.ungroupLayout()); CHECK(c.moveBefore({"b.audio"},"a.audio"));
+    CHECK(c.ungroupLayout());CHECK(!c.layoutGroupForRow("lane:a.audio"));
+    CHECK(c.moveBefore({"b.audio"},"a.audio"));
     CHECK(laneOrder(c) == std::vector<Id>({"tempo","b.audio","a.audio","a.midi","main.audio"}));
     CHECK(c.undoView()); CHECK(laneOrder(c) == initial); CHECK(c.redoView()); CHECK(laneOrder(c)[1] == "b.audio");
     CHECK(c.snapshot().relations.empty()); // layout groups never create musical links
@@ -140,8 +150,8 @@ void commands()
     CHECK(c.control("a.midi",CommandKind::monitoring,false,Monitoring::live));
     CHECK(commands[0].owner == "a" && commands[1].owner == "a"); CHECK(commands[0].revision == 1);
     CHECK(!c.control("main.audio",CommandKind::solo,true)); CHECK(!c.control("tempo",CommandKind::mute,true));
-    CHECK(c.edit(CommandKind::temporalGroup,{{"a.audio","c1"},{"a.audio","c2"}}));
-    CHECK(!c.edit(CommandKind::temporalGroup,{{"a.audio","c1"},{"a.midi","c3"}}));
+    CHECK(c.edit(CommandKind::glueClips,{{"a.audio","c1"},{"a.audio","c2"}}));
+    CHECK(!c.edit(CommandKind::glueClips,{{"a.audio","c1"},{"a.midi","c3"}}));
     CHECK(c.edit(CommandKind::linkClips,{{"a.audio","c1"},{"a.midi","c3"}}));
     CHECK(!c.edit(CommandKind::linkClips,{{"a.audio","c1"},{"a.audio","c2"}}));
     CHECK(!c.edit(CommandKind::moveClips,{{"a.audio","c1"},{"a.audio","c1"}},1));

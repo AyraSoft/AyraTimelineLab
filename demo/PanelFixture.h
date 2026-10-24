@@ -8,11 +8,18 @@
 namespace ayra::lab
 {
 namespace panel = ayra::timeline_panel;
+struct PanelFixtureSplitLineage
+{
+    panel::EventRef left,right;
+    double fraction=0.5;
+    bool operator==(const PanelFixtureSplitLineage&) const = default;
+};
 struct PanelFixtureMetadata
 {
     std::vector<panel::Owner> owners;
     std::vector<panel::Lane> lanes;
     std::vector<panel::Relation> relations;
+    std::vector<PanelFixtureSplitLineage> splitLineage;
     std::set<panel::EventRef> locked;
     // Defaults are fixtures, NOT a replacement for the product's settings colour resolver.
     std::array<std::uint32_t, 8> streamColours {
@@ -33,14 +40,12 @@ inline const char* monitoringName(panel::Monitoring value)
 inline Clip* fixtureClip(Session& session, const panel::EventRef& ref)
 {
     auto* lane = findTrack(session,ref.lane); if (!lane) return nullptr;
-    const auto found = std::find_if(lane->clips.begin(),lane->clips.end(),[&](const auto& c){return c.id==ref.clip;});
-    return found == lane->clips.end() ? nullptr : &*found;
+    return findClip(*lane,ref.clip);
 }
 inline const Clip* fixtureClip(const Session& session, const panel::EventRef& ref)
 {
     const auto* lane = findTrack(session,ref.lane); if (!lane) return nullptr;
-    const auto found = std::find_if(lane->clips.begin(),lane->clips.end(),[&](const auto& c){return c.id==ref.clip;});
-    return found == lane->clips.end() ? nullptr : &*found;
+    return findClip(*lane,ref.clip);
 }
 inline panel::Snapshot panelSnapshot(const Session& session, std::uint64_t revision)
 {
@@ -140,9 +145,13 @@ inline Session makePanelFixture()
         }
         s.manualOrder.push_back(t.id); s.tracks.push_back(std::move(t));
     }
+    if (auto* backing=findTrack(s,"backing.audio"))
+    {
+        const auto initialGlue=createClipContainer(*backing,{},
+            {"backing.audio.one","backing.audio.two"},"backing.audio.glue");
+        (void)initialGlue;
+    }
     m->relations={
-        {"temporal-example",panel::RelationKind::temporalGroup,
-            {{"backing.audio","backing.audio.one"},{"backing.audio","backing.audio.two"}}},
         {"vertical-example",panel::RelationKind::clipLink,
             {{"voice.audio","voice.audio.one"},{"voice.midi","voice.midi.one"},{"voice.image","voice.image.one"}}}
     };
@@ -204,20 +213,81 @@ inline std::string preparePanelFixture(const Session& before, Session& candidate
                 }
             }
         }
-        // Do not silently turn a split on one linked clip into unrelated trims elsewhere.
-        if (!changed.empty())
-            for (const auto& lane:candidate.tracks)
-                for (const auto& clip:lane.clips)
-                    if (!fixtureClip(before,{lane.id,clip.id}))
-                        for (const auto& [ref, delta]:changed)
-                            if (ref.lane==lane.id && adjacency.contains(ref) && !adjacency[ref].empty()
-                                && !delta.removed)
-                                return "Detach the relation before split/duplicate; relation-aware split is not implemented by this fixture";
+        // A related split is valid only when every member is divided at the same
+        // timeline point and every touched relation is cloned for the right halves.
+        std::set<panel::EventRef> relatedAdditions;
+        for(const auto& lane:candidate.tracks)
+            for(const auto& clip:lane.clips)
+                if(!fixtureClip(before,{lane.id,clip.id}))
+                    for(const auto& [ref,delta]:changed)
+                        if(ref.lane==lane.id&&!delta.removed&&adjacency.contains(ref)&&!adjacency[ref].empty())
+                            relatedAdditions.insert({lane.id,clip.id});
+        if(!relatedAdditions.empty())
+        {
+            bool validSplit=true;
+            std::map<panel::EventRef,panel::EventRef> rightByLeft;
+            for(const auto& [ref,delta]:changed)
+            {
+                if(!adjacency.contains(ref)||adjacency[ref].empty())continue;
+                const auto* old=fixtureClip(before,ref);const auto* left=fixtureClip(candidate,ref);
+                if(delta.removed||!old||!left||std::abs(delta.start)>1.0e-8||delta.end>=-1.0e-8)
+                {validSplit=false;break;}
+                std::optional<panel::EventRef> match;
+                for(const auto& lineage:candidate.panelMetadata->splitLineage)
+                {
+                    if(lineage.left!=ref||!relatedAdditions.contains(lineage.right))continue;
+                    const auto& rightRef=lineage.right;
+                    const auto* right=fixtureClip(candidate,rightRef);
+                    const double seam=left->start+left->length;
+                    if(!right||std::abs(right->start-seam)>1.0e-8
+                        ||std::abs(right->start+right->length-(old->start+old->length))>1.0e-8
+                        ||right->name!=old->name||right->channels!=old->channels||right->seed!=old->seed
+                        ||std::abs(lineage.fraction-left->length/old->length)>1.0e-8
+                        ||match)
+                    {validSplit=false;break;}
+                    match=rightRef;
+                }
+                if(!validSplit||!match){validSplit=false;break;}
+                rightByLeft.emplace(ref,*match);
+            }
+            if(validSplit&&rightByLeft.size()!=relatedAdditions.size())validSplit=false;
+            if(validSplit)
+                for(const auto& relation:before.panelMetadata->relations)
+                {
+                    const bool touched=std::any_of(relation.members.begin(),relation.members.end(),
+                        [&](const auto& ref){return rightByLeft.contains(ref);});
+                    if(!touched)continue;
+                    std::set<panel::EventRef> rightMembers;
+                    for(const auto& member:relation.members)
+                    {
+                        const auto mapped=rightByLeft.find(member);
+                        if(mapped==rightByLeft.end()){validSplit=false;break;}
+                        rightMembers.insert(mapped->second);
+                    }
+                    if(!validSplit)break;
+                    const bool preserved=std::any_of(candidate.panelMetadata->relations.begin(),candidate.panelMetadata->relations.end(),
+                        [&](const auto& candidateRelation){return candidateRelation.id==relation.id
+                            &&candidateRelation.kind==relation.kind&&candidateRelation.members==relation.members;});
+                    const bool cloned=std::any_of(candidate.panelMetadata->relations.begin(),candidate.panelMetadata->relations.end(),
+                        [&](const auto& candidateRelation){return candidateRelation.kind==relation.kind
+                            &&std::set<panel::EventRef>(candidateRelation.members.begin(),candidateRelation.members.end())==rightMembers;});
+                    if(!preserved||!cloned){validSplit=false;break;}
+                }
+            if(!validSplit)
+                return "Related clips must be split atomically with their relation topology";
+        }
     }
     auto metadata=std::make_shared<PanelFixtureMetadata>(*candidate.panelMetadata);
     for (auto& relation:metadata->relations)
         std::erase_if(relation.members,[&](const auto& ref){return !fixtureClip(candidate,ref);});
     std::erase_if(metadata->relations,[](const auto& r){return r.members.size()<2;});
+    std::erase_if(metadata->splitLineage,[&](const auto& split)
+        {return !fixtureClip(candidate,split.left)||!fixtureClip(candidate,split.right);});
+    std::set<panel::EventRef> lineageRights;
+    for(const auto& split:metadata->splitLineage)
+        if(!std::isfinite(split.fraction)||split.fraction<=0.0||split.fraction>=1.0
+            ||!lineageRights.insert(split.right).second)
+            return "Invalid split lineage";
     std::erase_if(metadata->locked,[&](const auto& ref){return !fixtureClip(candidate,ref);});
     if (*metadata!=*candidate.panelMetadata) candidate.panelMetadata=metadata;
     const auto projected=panelSnapshot(candidate,0);
@@ -239,6 +309,12 @@ inline std::string preparePanelFixture(const Session& before, Session& candidate
 class PanelFixtureHost
 {
 public:
+    struct SplitResult
+    {
+        panel::Result result;
+        panel::Id rightClipId;
+    };
+
     explicit PanelFixtureHost(Store& store) : model(store), previousChanged(store.changed), previousPrepare(store.prepareCommit)
     {
         model.prepareCommit=[this](const Session& a,Session& b)
@@ -306,50 +382,59 @@ public:
                 if (meta->locked.contains(ref)) return panel::Result::fail("Locked event");
                 lanes.insert(ref.lane);
             }
-            if (c.kind==K::temporalGroup || c.kind==K::linkClips)
+            if (c.kind==K::glueClips)
             {
-                const auto kind=c.kind==K::temporalGroup ? panel::RelationKind::temporalGroup : panel::RelationKind::clipLink;
-                if (unique.size()<2 || (kind==panel::RelationKind::temporalGroup ? lanes.size()!=1 : lanes.size()<2))
+                if (unique.size()<2 || lanes.size()!=1)
+                    return panel::Result::fail("Glue requires sibling clips in one lane");
+                if (std::any_of(meta->relations.begin(),meta->relations.end(),[&](const auto& relation)
+                    {
+                        return std::any_of(relation.members.begin(),relation.members.end(),
+                            [&](const auto& ref){return unique.contains(ref);});
+                    }))
+                    return panel::Result::fail("Linked clips cannot cross a container boundary");
+
+                auto* track=findTrack(next,*lanes.begin());
+                const auto scope=findClipSiblingScope(*track,c.events.front().clip);
+                if (scope.clips==nullptr || std::any_of(c.events.begin(),c.events.end(),[&](const auto& ref)
+                    {
+                        return ref.lane!=*lanes.begin()
+                            || std::none_of(scope.clips->begin(),scope.clips->end(),[&](const auto& clip){return clip.id==ref.clip;});
+                    }))
+                    return panel::Result::fail("Glue clips must be direct siblings");
+
+                panel::Id id;
+                do { id="glue-"+std::to_string(++nextContainer); }
+                while (std::any_of(next.tracks.begin(),next.tracks.end(),[&](const auto& candidate)
+                    { return findClip(candidate,id)!=nullptr; }));
+                std::vector<std::string> ids;
+                ids.reserve(c.events.size());
+                for (const auto& ref:c.events) { ids.push_back(ref.clip); }
+                const auto glued=createClipContainer(*track,scope.parentContainerId,ids,id);
+                if (!glued) { return panel::Result::fail(glued.message); }
+                next.selectedClip=glued.containerId;
+            }
+            else if (c.kind==K::linkClips)
+            {
+                if (unique.size()<2 || lanes.size()<2)
                     return panel::Result::fail("Invalid relation scope");
                 panel::Id id;
-                if(kind==panel::RelationKind::temporalGroup) {
-                    // Union existing horizontal groups; leave every vertical link intact.
-                    std::set<panel::EventRef> members=unique;
-                    bool grew=true;
-                    while(grew) {
-                        grew=false;
-                        for(const auto& relation:meta->relations)
-                            if(relation.kind==kind && std::any_of(relation.members.begin(),relation.members.end(),
-                                [&](const auto& ref){return members.contains(ref);})) {
-                                if(id.empty())id=relation.id;
-                                for(const auto& ref:relation.members)grew=members.insert(ref).second||grew;
-                            }
-                    }
-                    for(const auto& ref:members)
-                        if(ref.lane!=*lanes.begin() || !fixtureClip(next,ref) || meta->locked.contains(ref))
-                            return panel::Result::fail("Invalid or locked temporal group member");
-                    const auto identical=std::find_if(meta->relations.begin(),meta->relations.end(),[&](const auto& rel){
-                        return rel.kind==kind && std::set<panel::EventRef>(rel.members.begin(),rel.members.end())==members;});
-                    if(identical!=meta->relations.end())return {}; // idempotent, no Undo entry
-                    std::erase_if(meta->relations,[&](const auto& relation){
-                        return relation.kind==kind && std::any_of(relation.members.begin(),relation.members.end(),
-                            [&](const auto& ref){return members.contains(ref);});});
-                    if(id.empty()) {
-                        do {id="relation-"+std::to_string(++nextRelation);}
-                        while(std::any_of(meta->relations.begin(),meta->relations.end(),[&](const auto& rel){return rel.id==id;}));
-                    }
-                    meta->relations.push_back({id,kind,{members.begin(),members.end()}});
-                } else {
-                    do { id="relation-"+std::to_string(++nextRelation); }
-                    while (std::any_of(meta->relations.begin(),meta->relations.end(),[&](const auto& rel){return rel.id==id;}));
-                    meta->relations.push_back({id,kind,c.events});
+                do { id="relation-"+std::to_string(++nextRelation); }
+                while (std::any_of(meta->relations.begin(),meta->relations.end(),[&](const auto& rel){return rel.id==id;}));
+                meta->relations.push_back({id,panel::RelationKind::clipLink,c.events});
+            }
+            else if (c.kind==K::dissolveContainer)
+            {
+                for (const auto& ref:c.events)
+                {
+                    if (!dissolveClipContainer(*findTrack(next,ref.lane),ref.clip))
+                        return panel::Result::fail("Selected clip is not a container");
+                    if (next.selectedClip==ref.clip) next.selectedClip.clear();
                 }
             }
-            else if (c.kind==K::dissolveGroup || c.kind==K::unlinkClips)
+            else if (c.kind==K::unlinkClips)
             {
-                const auto kind=c.kind==K::dissolveGroup ? panel::RelationKind::temporalGroup : panel::RelationKind::clipLink;
                 std::erase_if(meta->relations,[&](const auto& r)
-                { return r.kind==kind && std::any_of(r.members.begin(),r.members.end(),[&](const auto& ref){return unique.contains(ref);}); });
+                { return r.kind==panel::RelationKind::clipLink && std::any_of(r.members.begin(),r.members.end(),[&](const auto& ref){return unique.contains(ref);}); });
             }
             else
             {
@@ -362,8 +447,13 @@ public:
                     else if(c.kind==K::deleteClips)
                     {
                         auto* lane=findTrack(next,ref.lane);
-                        std::erase_if(lane->clips,[&](const Clip& value){return value.id==ref.clip;});
-                        if (next.selectedClip==ref.clip) next.selectedClip.clear();
+                        const auto* removedRoot=findClip(*lane,ref.clip);
+                        const bool removesSelection=removedRoot!=nullptr&&!next.selectedClip.empty()
+                            &&findClip(*removedRoot,next.selectedClip)!=nullptr;
+                        const auto scope=findClipSiblingScope(*lane,ref.clip);
+                        if (scope.clips==nullptr) return panel::Result::fail("Unknown clip scope");
+                        std::erase_if(*scope.clips,[&](const Clip& value){return value.id==ref.clip;});
+                        if (removesSelection) next.selectedClip.clear();
                     }
                     else return panel::Result::fail("Unsupported fixture command");
                 }
@@ -372,6 +462,85 @@ public:
         if (*meta!=*next.panelMetadata) next.panelMetadata=std::move(meta);
         const bool committed=model.commit(std::move(next),"Timeline panel fixture edit");
         return committed || model.lastError().empty() ? panel::Result{} : panel::Result::fail(model.lastError());
+    }
+    SplitResult splitClip(const panel::Id& laneId,const panel::Id& clipId,double splitTime)
+    {
+        if(!std::isfinite(splitTime))return {panel::Result::fail("Invalid split time"),{}};
+        const panel::EventRef origin{laneId,clipId};
+        auto next=model.state();
+        if(!next.panelMetadata||!fixtureClip(next,origin))
+            return {panel::Result::fail("Unknown clip"),{}};
+
+        auto meta=std::make_shared<PanelFixtureMetadata>(*next.panelMetadata);
+        std::set<panel::EventRef> component{origin};
+        std::vector<panel::EventRef> pending{origin};
+        for(std::size_t at=0;at<pending.size();++at)
+            for(const auto& relation:meta->relations)
+                if(std::find(relation.members.begin(),relation.members.end(),pending[at])!=relation.members.end())
+                    for(const auto& member:relation.members)
+                        if(component.insert(member).second)pending.push_back(member);
+
+        constexpr double minimumSegmentLength=0.2;
+        for(const auto& ref:component)
+        {
+            const auto* clip=fixtureClip(next,ref);
+            const double relative=clip?splitTime-clip->start:0.0;
+            if(!clip||relative<=minimumSegmentLength||relative>=clip->length-minimumSegmentLength)
+                return {panel::Result::fail("Every linked clip must cross the split point"),{}};
+            if(meta->locked.contains(ref))
+                return {panel::Result::fail("Locked linked clip: entire split rejected"),{}};
+        }
+
+        const auto idExists=[&](const panel::Id& id)
+        {
+            return std::any_of(next.tracks.begin(),next.tracks.end(),[&](const auto& lane)
+                {return findClip(lane,id)!=nullptr;});
+        };
+        std::set<panel::Id> reservedIds;
+        const auto mintId=[&](const panel::Id& base)
+        {
+            panel::Id candidate=base;
+            int counter=1;
+            while(idExists(candidate)||reservedIds.contains(candidate))
+                candidate=base+"_"+std::to_string(++counter);
+            reservedIds.insert(candidate);
+            return candidate;
+        };
+        std::map<panel::EventRef,panel::EventRef> rightByLeft;
+        for(const auto& ref:component)
+        {
+            auto* lane=findTrack(next,ref.lane);
+            const auto split=ayra::lab::splitClip(*lane,ref.clip,splitTime,mintId);
+            if(!split)return {panel::Result::fail(split.message),{}};
+            const panel::EventRef rightRef{ref.lane,split.rightClipId};
+            for(const auto& lineage:split.lineage)
+                meta->splitLineage.push_back(
+                    {{ref.lane,lineage.leftId},{ref.lane,lineage.rightId},lineage.fraction});
+            rightByLeft.emplace(ref,std::move(rightRef));
+        }
+
+        const auto relationsBefore=meta->relations;
+        for(const auto& relation:relationsBefore)
+        {
+            if(!std::any_of(relation.members.begin(),relation.members.end(),[&](const auto& ref){return rightByLeft.contains(ref);}))
+                continue;
+            panel::Relation right=relation;
+            for(auto& member:right.members)
+            {
+                const auto mapped=rightByLeft.find(member);
+                if(mapped==rightByLeft.end())
+                    return {panel::Result::fail("Incomplete relation split"),{}};
+                member=mapped->second;
+            }
+            do {right.id="relation-"+std::to_string(++nextRelation);}
+            while(std::any_of(meta->relations.begin(),meta->relations.end(),[&](const auto& existing){return existing.id==right.id;}));
+            meta->relations.push_back(std::move(right));
+        }
+        const auto rightId=rightByLeft.at(origin).clip;
+        next.panelMetadata=std::move(meta);
+        if(!model.commit(std::move(next),"Taglio Clip collegato"))
+            return {panel::Result::fail(model.lastError().empty()?"Split produced no change":model.lastError()),{}};
+        return {{},rightId};
     }
     panel::Result setStreamColour(panel::Stream stream, std::uint32_t argb)
     {
@@ -388,6 +557,6 @@ private:
     Store& model;
     std::function<void()> previousChanged;
     std::function<std::string(const Session&,Session&)> previousPrepare;
-    std::uint64_t generation=1, nextRelation=0;
+    std::uint64_t generation=1, nextRelation=0, nextContainer=0;
 };
 }

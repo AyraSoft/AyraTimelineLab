@@ -24,6 +24,7 @@ using clips::LineClipVisual;
 using clips::LineCrossfadeContext;
 using clips::LineCrossfadeResult;
 using clips::LineCrossfadeSolver;
+using clips::GainPoint;
 using clips::makeBoundedCurvePixelSegment;
 using clips::MidiEnvelopePoint;
 using clips::TimelineClipZone;
@@ -45,6 +46,7 @@ struct LineClipUIState {
   juce::String valueUnit;
 
   std::vector<MidiEnvelopePoint> points;
+  std::vector<GainPoint> containerGainPoints = clips::makeDefaultContainerGainEnvelope();
   std::vector<LineWarpPoint> warpPoints;
   std::vector<float> warpMarkers;
   std::vector<float> origWarpMarkers;
@@ -398,6 +400,14 @@ public:
   }
 
   juce::String getTooltip() override {
+    const auto* interactionClip = findClip(
+        draggedClipId.empty() ? hoveredClipId : draggedClipId);
+    if (interactionClip != nullptr && interactionClip->isContainer()) {
+      const auto tooltip = clips::containerTransformTooltip(
+          draggedClipId.empty() ? activeZone : dragZone);
+      if (tooltip.isNotEmpty())
+        return tooltip;
+    }
     switch (activeZone) {
     case TimelineClipZone::edgeLeftLoop:
     case TimelineClipZone::edgeRightLoop:
@@ -443,7 +453,7 @@ public:
              "(Doppio click reset, Alt+Click elimina)";
     case TimelineClipZone::bottomCutRail:
       if(juce::ModifierKeys::getCurrentModifiersRealtime().isShiftDown())
-        return "Glue orizzontale: Shift+clic raggruppa selezione o clip successiva; Shift+doppio clic tutta la lane";
+        return "Glue orizzontale immediato: Shift+clic raggruppa la selezione o la clip successiva";
       return "Binario di Taglio (Forbici)\nClicca per dividere la LineClip "
              "preservando esattamente la curva quadratica (De Casteljau)";
     case TimelineClipZone::clipTitleMove:
@@ -501,6 +511,8 @@ public:
 
     auto &orig = uiStates[origId];
     LineClipUIState next = orig;
+    next.containerGainPoints = clips::splitContainerGainEnvelope(
+        orig.containerGainPoints, splitFrac);
 
     const double origLenBefore =
         orig.origClipLength > 0.0 ? orig.origClipLength : 4.0;
@@ -545,23 +557,22 @@ public:
   }
 
   void setModel(const Track &t, int laneHeight) {
+    const auto reconcileSplits = [this] {
+      clips::reconcileDerivedClipSplits(panelView.clipSplits,
+          [this](const std::string &id) { return uiStates.contains(id); },
+          [this](const std::string &left, const std::string &right, float fraction) {
+            splitLineClipUI(left, right, fraction);
+          });
+    };
+    reconcileSplits();
     data = t;
     height = laneHeight;
     programAudible = audibility(host.store().state(), data).program;
 
-    std::set<std::string> live;
-    for (const auto &c : t.clips) {
+    std::set<std::string> live, liveComponents;
+    const auto prepareVisualState = [&](auto&& self, const Clip& c) -> void {
       live.insert(c.id);
-      auto component = clipComponents.find(c.id);
-      if (component == clipComponents.end()) {
-        auto &provider =
-            static_cast<clips::LineClipPresentationProvider &>(*this);
-        auto lineClip = std::make_unique<LineClipComponent>(c.id, provider);
-        addAndMakeVisible(*lineClip);
-        component = clipComponents.emplace(c.id, std::move(lineClip)).first;
-      }
-      component->second->toFront(false);
-
+      if (!uiStates.contains(c.id)) reconcileSplits();
       if (!uiStates.contains(c.id)) {
         LineClipUIState s;
         s.origClipLength = c.length;
@@ -603,13 +614,26 @@ public:
                       {0.50f, 0.85f, 0.35f, false},
                       {1.0f, 0.30f, 0.5f, false}};
         }
-
         syncLineWarpNorms(s, c.length, s.sourceOffsetSec);
         uiStates[c.id] = std::move(s);
       } else {
         syncLineWarpNorms(uiStates[c.id], c.length,
                           uiStates[c.id].sourceOffsetSec);
       }
+      for (const auto& child : c.children) self(self, child);
+    };
+    for (const auto &c : t.clips) {
+      liveComponents.insert(c.id);
+      auto component = clipComponents.find(c.id);
+      if (component == clipComponents.end()) {
+        auto &provider =
+            static_cast<clips::LineClipPresentationProvider &>(*this);
+        auto lineClip = std::make_unique<LineClipComponent>(c.id, provider);
+        addAndMakeVisible(*lineClip);
+        component = clipComponents.emplace(c.id, std::move(lineClip)).first;
+      }
+      component->second->toFront(false);
+      prepareVisualState(prepareVisualState, c);
     }
 
     for (auto i = uiStates.begin(); i != uiStates.end();)
@@ -618,7 +642,7 @@ public:
       else
         ++i;
     for (auto i = clipComponents.begin(); i != clipComponents.end();)
-      if (!live.contains(i->first))
+      if (!liveComponents.contains(i->first))
         i = clipComponents.erase(i);
       else
         ++i;
@@ -883,15 +907,14 @@ private:
     LineClipVisual visual;
     visual.bounds = localBodyBounds;
 
-    const auto clip = std::find_if(
-        data.clips.begin(), data.clips.end(),
-        [&clipId](const Clip &candidate) { return candidate.id == clipId; });
+    const auto* clip = ayra::lab::findClip(data, clipId);
     const auto state = uiStates.find(clipId);
-    if (clip == data.clips.end() || state == uiStates.end())
+    if (clip == nullptr || state == uiStates.end())
       return visual;
 
     auto &ui = state->second;
     syncLineWarpNorms(ui, clip->length, ui.sourceOffsetSec);
+    visual.container={clip->isContainer(),static_cast<int>(clip->children.size()),0};
 
     visual.title = juce::String::fromUTF8(clip->name.c_str());
     visual.tint = juce::Colour(data.colour);
@@ -941,6 +964,13 @@ private:
         computeClipFeaturesLOD(clipFeatures, localBodyBounds.getHeight(),
                                isDraggingWarp, isDraggingEnv, static_cast<float>(height));
     visual.features.glueHover = juce::ModifierKeys::getCurrentModifiersRealtime().isShiftDown();
+    if (clip->isContainer()) {
+      visual.container.gainPoints = ui.containerGainPoints.data();
+      visual.container.numGainPoints =
+          static_cast<int>(ui.containerGainPoints.size());
+      visual.container.showGainEnvelope = visual.features.showGainEnvelope;
+      visual.container.showGainPreview = visual.features.showEnvelopePreview;
+    }
 
     if (hoveredClipId == clipId ||
         (dragZone != TimelineClipZone::none && draggedClipId == clipId)) {
@@ -1065,6 +1095,90 @@ private:
       }
     }
 
+    if (clip->isContainer())
+      visual.container.hoveredGainPointIdx = visual.hoveredPointIdx;
+
+    if (!buildingContainedPreviews && clip->isContainer()) {
+      clips::buildNestedClipPlacements(
+          *clip, localBodyBounds, nestedPlacementsScratch,
+          [this](const Clip& parent, const float sourceNorm) {
+            const auto state = uiStates.find(parent.id);
+            if (state == uiStates.end()) return sourceNorm;
+            return clips::mapNormalizedWarp(
+                sourceNorm, state->second.origWarpMarkers,
+                state->second.warpMarkers);
+          },
+          [this](const Clip& parent, const float outputNorm) {
+            const auto state = uiStates.find(parent.id);
+            return state == uiStates.end()
+                ? 1.0f
+                : clips::evaluateContainerGainScale(
+                      state->second.containerGainPoints, outputNorm);
+          });
+      containedVisualsScratch.clear();
+      containedVisualsScratch.reserve(nestedPlacementsScratch.size());
+      buildingContainedPreviews = true;
+      for (const auto& placement : nestedPlacementsScratch) {
+        auto child = makeLineClipVisual(placement.clipId, placement.bounds,
+                                        parentOrigin);
+        child.container = {placement.isContainer, placement.numDirectChildren,
+                           placement.depth};
+        child.containedClipPreviews = nullptr;
+        child.numContainedClipPreviews = 0;
+        child.selected = false;
+        child.hoveredZone = TimelineClipZone::none;
+        child.overlap = {};
+        child.features = {};
+        child.features.warpEnabled = false;
+        child.features.gainEnabled = false;
+        child.features.cutEnabled = false;
+        child.features.fadesEnabled = false;
+        child.features.edgeToolsEnabled = false;
+        child.features.showWarpRail = false;
+        child.features.showWarpControls = false;
+        child.features.showGainEnvelope = false;
+        child.features.showEnvelopePreview = true;
+        child.features.showCutRail = false;
+        child.features.showFadeHandles = false;
+        child.features.showEdgeTools = false;
+        child.features.showDisplacementBadges = false;
+        child.features.glueHover = false;
+        child.ownedPreviewPoints.clear();
+        if (child.points != nullptr && child.numPoints >= 2) {
+          ayra::curves::CurveBoundarySpec boundary;
+          boundary.mode = child.boundaryPolicy;
+          boundary.startValue = child.boundaryStartNormValue;
+          boundary.endValue = child.boundaryEndNormValue;
+          boundary.fadeInControl = child.fadeInControl;
+          boundary.fadeOutControl = child.fadeOutControl;
+          constexpr int previewSamples = 65;
+          child.ownedPreviewPoints.reserve(previewSamples);
+          for (int sample = 0; sample < previewSamples; ++sample) {
+            const float sourceNorm = static_cast<float>(sample)
+                                   / static_cast<float>(previewSamples - 1);
+            const float value = clips::evaluateProjectedAutomationCurveAt(
+                child.points, child.numPoints, child.defaultNormValue,
+                boundary, sourceNorm,
+                [](const clips::MidiEnvelopePoint& point) noexcept {
+                  return point;
+                });
+            child.ownedPreviewPoints.push_back({
+                placement.transform.mapTime(sourceNorm),
+                juce::jlimit(0.0f, 1.0f,
+                             value * placement.transform.gainAt(sourceNorm)),
+                0.5f, false});
+          }
+        }
+        containedVisualsScratch.push_back(std::move(child));
+        auto& stored = containedVisualsScratch.back();
+        stored.points = stored.ownedPreviewPoints.data();
+        stored.numPoints = static_cast<int>(stored.ownedPreviewPoints.size());
+      }
+      buildingContainedPreviews = false;
+      visual.containedClipPreviews = containedVisualsScratch.data();
+      visual.numContainedClipPreviews =
+          static_cast<int>(containedVisualsScratch.size());
+    }
     return visual;
   }
 
@@ -1186,8 +1300,18 @@ private:
             return res;
           }
 
+          if (c.isContainer() && feat.showGainEnvelope) {
+            const auto gainHit = clips::hitTestContainerGainEnvelope(
+                b, ui.containerGainPoints, p);
+            if (gainHit.zone != TimelineClipZone::none) {
+              res.zone = gainHit.zone;
+              res.pointIdx = gainHit.pointIndex;
+              return res;
+            }
+          }
+
           // 3. Punti e segmenti della curva
-          if (feat.showGainEnvelope) {
+          if (!c.isContainer() && feat.showGainEnvelope) {
             const auto &pts = ui.points;
 
             const auto boundaryGeometry =
@@ -1341,15 +1465,20 @@ private:
       hoveredCurveSegmentIdx = hit.curveSegmentIdx;
 
       const auto &ui = uiStates.at(hit.clip->id);
+      const auto pointCount = hit.clip->isContainer()
+          ? static_cast<int>(ui.containerGainPoints.size())
+          : static_cast<int>(ui.points.size());
+      const auto boundaryMode = hit.clip->isContainer()
+          ? ayra::curves::CurveBoundaryMode::pinnedEndpoints
+          : ui.boundary.mode;
       const bool canMoveX = clips::canAutomationPointMoveHorizontally(
-          ui.boundary.mode, hoveredPointIdx,
-          static_cast<int>(ui.points.size()));
+          boundaryMode, hoveredPointIdx, pointCount);
       const bool canErase =
           clips::isClipDeletionZone(activeZone) ||
           activeZone == TimelineClipZone::warpMarker ||
           (activeZone == TimelineClipZone::gainEnvelopePoint &&
            clips::canAutomationPointBeRemoved(
-               hoveredPointIdx, static_cast<int>(ui.points.size())));
+               hoveredPointIdx, pointCount));
       setMouseCursor(
           clips::timelineMouseCursor(clips::resolveTimelineCursorRole(
               {activeZone, e.mods.isAltDown(), e.mods.isShiftDown(), canMoveX,
@@ -1381,11 +1510,18 @@ private:
                     active == TimelineClipZone::warpMarker;
     if (uiStates.contains(cid)) {
       const auto &ui = uiStates.at(cid);
+      const auto* clip = findClip(cid);
+      const auto pointCount = clip != nullptr && clip->isContainer()
+          ? static_cast<int>(ui.containerGainPoints.size())
+          : static_cast<int>(ui.points.size());
+      const auto boundaryMode = clip != nullptr && clip->isContainer()
+          ? ayra::curves::CurveBoundaryMode::pinnedEndpoints
+          : ui.boundary.mode;
       canMoveX = clips::canAutomationPointMoveHorizontally(
-          ui.boundary.mode, ptIdx, static_cast<int>(ui.points.size()));
+          boundaryMode, ptIdx, pointCount);
       canErase = canErase || (active == TimelineClipZone::gainEnvelopePoint &&
                               clips::canAutomationPointBeRemoved(
-                                  ptIdx, static_cast<int>(ui.points.size())));
+                                  ptIdx, pointCount));
     }
     setMouseCursor(clips::timelineMouseCursor(clips::resolveTimelineCursorRole(
         {active, modifiers.isAltDown(), modifiers.isShiftDown(), canMoveX,
@@ -1406,7 +1542,7 @@ private:
   void mouseDown(const juce::MouseEvent &e) override {
     const auto hit = hitTestZones(e.position);
     if(groupGesture.mouseDown(e,hit.clip && hit.zone==TimelineClipZone::bottomCutRail,
-         hit.clip?hit.clip->id:std::string{},panelView.prepareTemporalGroup)){grabKeyboardFocus();return;}
+         hit.clip?hit.clip->id:std::string{},panelView.prepareGlue)){grabKeyboardFocus();return;}
 
     if (hit.clip != nullptr && e.mods.isPopupMenu()) {
       auto context = clips::makeTimelinePointerContext(
@@ -1466,6 +1602,29 @@ private:
     snapshotUIState = ui;
     startClipStart = hit.clip->start;
     startClipLength = hit.clip->length;
+
+    if (hit.clip->isContainer() &&
+        (hit.zone == TimelineClipZone::gainEnvelopePoint ||
+         hit.zone == TimelineClipZone::gainEnvelopeLine)) {
+      if (e.mods.isAltDown() && !e.mods.isPopupMenu() &&
+          hit.zone == TimelineClipZone::gainEnvelopePoint) {
+        std::ignore = clips::removeContainerGainPoint(
+            ui.containerGainPoints, hit.pointIdx);
+        resetDragState();
+        repaint();
+        return;
+      }
+      if (!e.mods.isLeftButtonDown()) {
+        resetDragState();
+        return;
+      }
+      if (hit.zone == TimelineClipZone::gainEnvelopePoint)
+        clips::selectContainerGainPoint(ui.containerGainPoints,
+                                        hit.pointIdx, e.mods);
+      startContainerGainPoints = ui.containerGainPoints;
+      repaint();
+      return;
+    }
 
     if (e.mods.isAltDown() && !e.mods.isPopupMenu()) {
       if (hit.zone == TimelineClipZone::warpMarker && hit.markerIdx >= 0 &&
@@ -1639,6 +1798,22 @@ private:
     const auto b = clipBounds(*cl, pps);
     constexpr float kTitleAreaHeight = 16.0f;
     const float bodyH = juce::jmax(10.0f, b.getHeight() - kTitleAreaHeight);
+
+    if (cl->isContainer() &&
+        (dragZone == TimelineClipZone::gainEnvelopePoint ||
+         dragZone == TimelineClipZone::gainEnvelopeLine)) {
+      if (dragZone == TimelineClipZone::gainEnvelopePoint)
+        clips::dragContainerGainPoint(
+            ui.containerGainPoints, startContainerGainPoints,
+            draggedPointIdx, b, dragStartPos, e.position,
+            e.mods.isShiftDown());
+      else
+        clips::dragContainerGainEnvelope(
+            ui.containerGainPoints, startContainerGainPoints,
+            b, dragStartPos, e.position);
+      repaint();
+      return;
+    }
 
     if (dragZone == TimelineClipZone::clipTitleMove) {
       const double deltaSec = (e.position.x - dragStartPos.x) / pps;
@@ -2141,6 +2316,10 @@ private:
                 [](const MidiEnvelopePoint &a, const MidiEnvelopePoint &b) {
                   return a.normX < b.normX;
                 });
+      std::sort(ui.containerGainPoints.begin(), ui.containerGainPoints.end(),
+                [](const GainPoint& a, const GainPoint& b) {
+                  return a.normX < b.normX;
+                });
     }
 
     resetDragState();
@@ -2171,6 +2350,17 @@ private:
         key.getKeyCode() == juce::KeyPress::deleteKey) {
       bool anyChanged = false;
       for (auto &[cid, ui] : uiStates) {
+        if (ui.containerGainPoints.size() > 2) {
+          auto it = ui.containerGainPoints.begin() + 1;
+          while (it != ui.containerGainPoints.end() - 1) {
+            if (it->selected) {
+              it = ui.containerGainPoints.erase(it);
+              anyChanged = true;
+            } else {
+              ++it;
+            }
+          }
+        }
         if (ui.points.size() > 2) {
           auto it = ui.points.begin() + 1;
           while (it != ui.points.end() - 1) {
@@ -2207,7 +2397,35 @@ private:
 
     if (hit.clip == nullptr)
       return;
+    if (clip_height_law::isHeaderAreaOrClosedClip(hit.zone,hit.bounds.getHeight(),hit.markerIdx)) {
+      if (panelView.enabled && panelView.cycleHeight) panelView.cycleHeight();
+      else host.store().resize(data.id,clip_height_law::nextModelHeight(
+          static_cast<float>(height),host.getVerticalZoom()));
+      return;
+    }
+    if (hit.clip->isContainer() &&
+        (hit.zone==TimelineClipZone::none||hit.zone==TimelineClipZone::clipBody) &&
+        panelView.openContainerEditor) {
+      panelView.openContainerEditor(hit.clip->id,*this,hit.bounds.toNearestInt());
+      return;
+    }
     auto &ui = uiStates[hit.clip->id];
+
+    if (hit.clip->isContainer()) {
+      if (hit.zone == TimelineClipZone::gainEnvelopePoint &&
+          hit.pointIdx >= 0 &&
+          hit.pointIdx < static_cast<int>(ui.containerGainPoints.size())) {
+        ui.containerGainPoints[static_cast<std::size_t>(hit.pointIdx)].gainDb = 0.0f;
+        repaint();
+        return;
+      }
+      if (hit.zone == TimelineClipZone::gainEnvelopeLine) {
+        clips::addContainerGainPoint(ui.containerGainPoints,
+                                     hit.bounds, e.position);
+        repaint();
+        return;
+      }
+    }
 
     const double clickSec =
         panelView.xToTime(e.position.x,getWidth());
@@ -2305,15 +2523,6 @@ private:
       applyCrossfadeCurvature(hit.clip->id, false, {0.5, 0.5, -1.0});
       return;
     }
-    // Surface without a separate double-click action: cycle ONLY the lane's
-    // presentation height. Other semantic targets retain their own handlers.
-    if (hit.clip && clip_height_law::isHeaderAreaOrClosedClip(hit.zone,hit.bounds.getHeight(),hit.markerIdx)) {
-      if (panelView.enabled && panelView.cycleHeight) panelView.cycleHeight();
-      else host.store().resize(data.id, clip_height_law::nextModelHeight(
-          static_cast<float>(height), host.getVerticalZoom()));
-      return;
-    }
-
   }
 
 private:
@@ -2336,6 +2545,9 @@ private:
   bool programAudible = true;
 
   std::map<std::string, LineClipUIState> uiStates;
+  bool buildingContainedPreviews = false;
+  std::vector<clips::NestedClipPlacement> nestedPlacementsScratch;
+  std::vector<LineClipVisual> containedVisualsScratch;
   std::set<std::pair<std::string, std::string>> xfadePairs;
   std::map<std::string, std::unique_ptr<LineClipComponent>> clipComponents;
 
@@ -2362,6 +2574,7 @@ private:
   juce::Point<float> dragStartPos;
 
   std::vector<MidiEnvelopePoint> startEnvelopePoints;
+  std::vector<GainPoint> startContainerGainPoints;
   ayra::curves::CurveBoundarySpec startBoundary;
 
   bool hasDragSnapshot = false;

@@ -55,28 +55,69 @@ premuto Shift, anche col mouse fermo. Senza Shift il taglio normale resta immedi
 
 | Gesto | Operazione |
 | --- | --- |
-| Shift + clic | Raggruppa le clip selezionate nella stessa lane, se almeno due; altrimenti la clip premuta e la successiva in ordine temporale. |
-| Shift + doppio clic | Raggruppa tutte le clip della lane nel documento, incluse quelle fuori viewport. |
-| Drag oltre 4 px / Escape / cambio revisione del documento | Annulla il raggruppamento pendente senza tagliare. |
+| Shift + clic | Raggruppa immediatamente al rilascio le clip selezionate nella stessa lane, se almeno due; altrimenti la clip premuta e la successiva in ordine temporale. |
+| Drag oltre 4 px / Escape / cambio revisione del documento prima del rilascio | Annulla il raggruppamento senza tagliare. |
 
-Il singolo clic aspetta l'intervallo di doppio clic configurato in JUCE; il
-secondo annulla il singolo pendente. Ogni gesto produce al massimo **una**
-transazione e un solo Undo. Il callback cattura identita', revisione e selezione
-prima che altri input possano modificarle; la riga mantiene la residenza durante
-l'attesa. La selezione multi-clip e' quella gia' usata dal pannello (`Clip...` e
-menu contestuale), non la selezione dei punti di automazione o delle note MIDI.
+Non esistono piu' temporizzazione o variante a doppio clic; un secondo clic rapido
+viene consumato per evitare un Glue annidato accidentale. Ogni gesto produce al
+massimo **una** transazione e un solo Undo. Il callback cattura identita', revisione
+e selezione durante il mouse-down e le rivalida al rilascio. La selezione multi-clip
+e' quella gia' usata dal pannello (`Clip...` e menu contestuale), non la selezione
+dei punti di automazione o delle note MIDI.
 La richiesta senza clip successiva, con membri bloccati o riferimenti obsoleti
 viene rifiutata, non convertita in split.
 
-Il comando e' `temporalGroup`: non `clipLink`, non `groupLayout`, non rendering
-PCM e non concatenazione distruttiva dei media. I gruppi orizzontali esistenti
-interessati vengono uniti, evitando appartenenze duplicate; i link verticali
-preesistenti non vengono modificati. Ripetere un gruppo identico e' un no-op.
-Si riusa `preparePanelFixture`: propagazione delle operazioni solidali,
-validazione, rollback e Undo/Redo restano dello Store. Le restrizioni esistenti
-sullo split/duplicazione di clip gia' collegate non sono rimosse da questa modifica.
+Il comando e' `glueClips`: non `clipLink`, non `groupLayout` e non una relazione
+soltanto grafica. Le clip sorelle vengono rimosse dalla lane corrente e inserite,
+con tempi relativi e identita' invariate, in una nuova clip container. Il container
+espone i propri controlli Warp e Gain, oltre a bordi, Cut rail e Glue rail; puo'
+quindi essere tagliato, ridimensionato o inserito in un altro container. Lo split
+partiziona ricorsivamente il sotto-arrangement: una clip interna intera appartiene
+a una sola meta', mentre una clip attraversata dal taglio viene divisa.
+`dissolveContainer` ripristina i figli diretti ed e' una singola transazione Undo.
+
+Nel Lab il Warp del container deforma l'intero sotto-arrangement: posizione,
+durata e contenuto visuale dei figli vengono proiettati dalla stessa mappa, quindi
+anche i vuoti si comprimono o si espandono. La trasformazione si compone
+ricorsivamente con i Warp dei container annidati senza riscrivere lo stato interno
+dei figli. Il Gain del container e' un inviluppo esterno moltiplicativo: scala
+waveform audio, velocity MIDI, valori Line e opacita' Image; nei container annidati
+i Gain degli antenati vengono moltiplicati. I punti estremi restano ancorati,
+Shift vincola il drag in verticale, Alt rimuove un punto interno e il doppio clic
+sulla linea ne inserisce uno. Sciogliere il Glue rimuove soltanto le trasformazioni
+esterne; un eventuale bake/flatten resta un comando separato ed esplicito.
+
+Nella timeline chiusa ogni figlio usa il proprio renderer reale ridotto: waveform
+audio, note MIDI, curva Line o filmstrip Image. I vuoti temporali restano vuoti e
+i container annidati vengono proiettati ricorsivamente. I figli non espongono
+Warp/Gain ne' hit-zone; Warp e Gain visibili appartengono al container. Un container
+MIDI non espone la scrollbar pitch ne' la sua hit-zone: le preview scelgono il range
+automaticamente, mentre le clip aperte nel canvas interno conservano il proprio scroll.
+Il doppio
+click sull'header conserva il ciclo d'altezza; quello su una zona libera del corpo
+apre un `CallOutBox` temporaneo con il canvas reale dei figli. Qui le clip tornano
+editabili normalmente, incluso Glue annidato; `Sciogli Glue` dissolve il container
+aperto. Lo stato visuale resta indicizzato dagli ID canonici anche
+quando i figli non sono montati nella timeline principale.
+
+Una clip gia' parte di un `clipLink` verticale non puo' attraversare il confine di
+un container: Glue viene rifiutato atomicamente invece di lasciare relazioni tra
+documenti sorgente diversi. Nella fixture questa struttura ricorsiva modella il
+contratto di `ayra::timeline::EditSource`; non introduce un secondo owner prodotto.
+Lo split di una clip collegata e' invece atomico: tutte le clip della componente
+relazionale che attraversano il punto vengono divise nella stessa transazione e
+la topologia viene clonata per le meta' destre. Un membro bloccato o che non
+attraversa il punto rifiuta l'intera operazione, senza mutare curve locali. I canvas
+non originanti riconciliano lo stato derivato della nuova meta' dal proprio stato
+sinistro, evitando reset di note, warp o automazione.
 Le lane evento keyframe, che non espongono clip documentali, conservano le loro
 operazioni locali: non si raggruppano fittiziamente gli eventi usando ID di clip diverse.
+
+I gruppi di layout delle lane restano `ViewState::layoutGroups`, separati dai
+gruppi musicali. Il Controller prepara una proiezione O(1) per riga e il pannello
+disegna parentesi continue ai due bordi, colore stabile e badge `LANE GROUP N`.
+Il feedback segue riordino, righe nascoste, cambio modalita', Undo e Ungroup senza
+creare una seconda source of truth.
 
 ## Card
 

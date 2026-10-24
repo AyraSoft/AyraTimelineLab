@@ -37,13 +37,22 @@ and do not subtract another region. `seamHeight` is zero.
 The Controller owns layout mode/order/groups, selected and hidden lane IDs, height
 previews, chrome preferences and bounded view Undo. Reordering never reparents
 musical data. Structured layout groups contain whole owners; free groups contain
-lane IDs; switching modes never widens a partial group silently.
+lane IDs; switching modes never widens a partial group silently. `finishLayout`
+derives indexed per-row group joins once per layout rebuild, so the native painter
+can render continuous brackets and labels without scanning group membership in paint.
 
 Snapshot owner/lane/event IDs remain external identities. Commands carry session,
 revision, owner and the relevant lane/event scope. Inline title edits use renameOwner;
 the separate renameLane API continues to change only a lane alias;
 M/S/Monitoring/Open address its owner. Song Main has no Solo. Previous/next address
 the lane, not every lane of that owner. The host admits commands atomically.
+
+`glueClips` richiede almeno due eventi della stessa lane; il pannello non possiede
+la struttura risultante. L'host crea una clip container nel proprio document model
+e pubblica poi soltanto il nuovo evento radice. `dissolveContainer` esegue l'operazione
+inversa. `clipLink` resta una relazione cross-lane separata, mentre `layoutGroups`
+resta puro ViewState. Nella demo il mapping e' ricorsivo; nel prodotto il canonical
+owner equivalente e' `ayra::timeline::EditSource`.
 
 `HeightPolicy::compact` rejects manual resize; `automatic` accepts a content height;
 `manual` supports preview, Escape cancel and one view Undo on release. A supplied

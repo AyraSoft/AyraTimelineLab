@@ -26,6 +26,53 @@ bool validOrder(const std::vector<int>& order, int count)
     }
     return true;
 }
+
+template <typename ClipVector>
+auto* findClipRecursive(ClipVector& clips, const std::string& id) noexcept
+{
+    for (auto& clip : clips)
+    {
+        if (clip.id == id) { return &clip; }
+        if (auto* nested = findClipRecursive(clip.children, id)) { return nested; }
+    }
+    using Pointer = decltype(&clips.front());
+    return Pointer(nullptr);
+}
+
+template <typename TrackType>
+auto* findClipScope(TrackType& track, const std::string& parentId) noexcept
+{
+    using ClipVector = decltype(&track.clips);
+    if (parentId.empty()) { return ClipVector(&track.clips); }
+    auto* parent = findClipRecursive(track.clips, parentId);
+    return parent != nullptr ? ClipVector(&parent->children) : nullptr;
+}
+
+bool validateClipTree(const Clip& clip, const Track& track,
+                      std::unordered_set<std::string>& ids,
+                      std::size_t& total, const int depth)
+{
+    if (++total > 4096 || depth > 16
+        || clip.id.empty() || clip.id.size() > 128 || !ids.insert(clip.id).second
+        || clip.name.size() > 256)
+        return false;
+    if (clip.channels < 1 || clip.channels > track.audioChannels
+        || clip.seed < 0 || clip.seed > 100000
+        || !std::isfinite(clip.start) || clip.start < 0.0 || clip.start > 3600.0
+        || !std::isfinite(clip.length) || clip.length < 0.125 || clip.length > 3600.0
+        || clip.start + clip.length > 3600.0)
+        return false;
+    if (!std::isfinite(clip.fadeIn) || !std::isfinite(clip.fadeOut)
+        || clip.fadeIn < 0.0 || clip.fadeOut < 0.0
+        || clip.fadeIn + clip.fadeOut > clip.length + 1.0e-9)
+        return false;
+    if ((!clip.container && !clip.children.empty()) || clip.children.size() > 64)
+        return false;
+    for (const auto& child : clip.children)
+        if (!validateClipTree(child, track, ids, total, depth + 1))
+            return false;
+    return true;
+}
 }
 const char* roleKey(Role r) noexcept
 {
@@ -54,6 +101,263 @@ Track* findTrack(Session& s, const std::string& id) noexcept
 {
     auto i = std::find_if(s.tracks.begin(),s.tracks.end(),[&](const auto& t){return t.id==id;});
     return i == s.tracks.end() ? nullptr : &*i;
+}
+const Clip* findClip(const Track& track, const std::string& id) noexcept
+{
+    return findClipRecursive(track.clips, id);
+}
+Clip* findClip(Track& track, const std::string& id) noexcept
+{
+    return findClipRecursive(track.clips, id);
+}
+const Clip* findClip(const Clip& clip, const std::string& id) noexcept
+{
+    if (clip.id == id) { return &clip; }
+    return findClipRecursive(clip.children, id);
+}
+Clip* findClip(Clip& clip, const std::string& id) noexcept
+{
+    if (clip.id == id) { return &clip; }
+    return findClipRecursive(clip.children, id);
+}
+const Clip* findClip(const Session& session, const std::string& trackId,
+                     const std::string& clipId) noexcept
+{
+    const auto* track = findTrack(session, trackId);
+    return track != nullptr ? findClip(*track, clipId) : nullptr;
+}
+Clip* findClip(Session& session, const std::string& trackId,
+               const std::string& clipId) noexcept
+{
+    auto* track = findTrack(session, trackId);
+    return track != nullptr ? findClip(*track, clipId) : nullptr;
+}
+ClipSiblingScope findClipSiblingScope(Track& track, const std::string& clipId) noexcept
+{
+    const auto search = [&](auto&& self, std::vector<Clip>& siblings,
+                            const std::string& parentId) -> ClipSiblingScope
+    {
+        for (auto& clip:siblings)
+        {
+            if (clip.id==clipId) { return {&siblings,parentId}; }
+            if (auto nested=self(self,clip.children,clip.id); nested.clips!=nullptr)
+                return nested;
+        }
+        return {};
+    };
+    return search(search,track.clips,{});
+}
+void collectClipIds(const Clip& clip, std::vector<std::string>& output)
+{
+    output.push_back(clip.id);
+    for (const auto& child : clip.children) { collectClipIds(child, output); }
+}
+
+ClipContainerEditResult createClipContainer(
+    Track& track, const std::string& parentContainerId,
+    const std::vector<std::string>& clipIds, std::string containerId)
+{
+    auto* siblings = findClipScope(track, parentContainerId);
+    if (siblings == nullptr || clipIds.size() < 2 || containerId.empty())
+        return {false, {}, "Invalid Glue scope"};
+    if (findClip(track, containerId) != nullptr)
+        return {false, {}, "Duplicate container identity"};
+
+    std::unordered_set<std::string> requested;
+    requested.reserve(clipIds.size());
+    for (const auto& id : clipIds)
+        if (id.empty() || !requested.insert(id).second)
+            return {false, {}, "Duplicate Glue selection"};
+
+    std::vector<std::size_t> indices;
+    indices.reserve(requested.size());
+    for (std::size_t i = 0; i < siblings->size(); ++i)
+        if (requested.contains((*siblings)[i].id)) { indices.push_back(i); }
+    if (indices.size() != requested.size())
+        return {false, {}, "Glue clips must be direct siblings"};
+
+    double start = std::numeric_limits<double>::max();
+    double end = 0.0;
+    int channels = 1;
+    int seed = 0;
+    for (const auto index : indices)
+    {
+        const auto& clip = (*siblings)[index];
+        start = std::min(start, clip.start);
+        end = std::max(end, clip.start + clip.length);
+        channels = std::max(channels, clip.channels);
+        seed = (seed * 131 + clip.seed) % 100001;
+    }
+    if (!std::isfinite(start) || !std::isfinite(end) || end - start < 0.125)
+        return {false, {}, "Invalid Glue range"};
+
+    Clip container;
+    container.id = std::move(containerId);
+    container.name = "Glue";
+    container.start = start;
+    container.length = end - start;
+    container.channels = channels;
+    container.seed = seed;
+    container.container = true;
+    container.children.reserve(indices.size());
+    for (const auto index : indices)
+    {
+        auto child = (*siblings)[index];
+        child.start -= start;
+        container.children.push_back(std::move(child));
+    }
+
+    const auto insertion = indices.front();
+    std::erase_if(*siblings, [&requested](const Clip& clip)
+    {
+        return requested.contains(clip.id);
+    });
+    siblings->insert(siblings->begin() + static_cast<std::ptrdiff_t>(insertion),
+                     std::move(container));
+    return {true, (*siblings)[insertion].id, {}};
+}
+
+bool dissolveClipContainer(Track& track, const std::string& containerId)
+{
+    const auto dissolveIn = [&](auto&& self, std::vector<Clip>& siblings) -> bool
+    {
+        for (auto at = siblings.begin(); at != siblings.end(); ++at)
+        {
+            if (at->id == containerId)
+            {
+                if (!at->isContainer()) { return false; }
+                const double parentStart = at->start;
+                std::vector<Clip> children = std::move(at->children);
+                for (auto& child : children) { child.start += parentStart; }
+                at = siblings.erase(at);
+                siblings.insert(at, std::make_move_iterator(children.begin()),
+                                std::make_move_iterator(children.end()));
+                return true;
+            }
+            if (self(self, at->children)) { return true; }
+        }
+        return false;
+    };
+    return dissolveIn(dissolveIn, track.clips);
+}
+
+ClipSplitEditResult splitClip(
+    Track& track, const std::string& clipId, const double splitTime,
+    const std::function<std::string(const std::string&)>& mintId)
+{
+    constexpr double minimumSegmentLength = 0.2;
+    if (!std::isfinite(splitTime) || !mintId)
+        return {false, {}, "Invalid split request", {}};
+
+    const auto scope = findClipSiblingScope(track, clipId);
+    if (scope.clips == nullptr)
+        return {false, {}, "Unknown clip scope", {}};
+
+    auto& siblings = *scope.clips;
+    const auto at = std::find_if(siblings.begin(), siblings.end(),
+        [&](const Clip& clip) { return clip.id == clipId; });
+    if (at == siblings.end())
+        return {false, {}, "Unknown clip", {}};
+
+    const double relative = splitTime - at->start;
+    if (relative <= minimumSegmentLength
+        || relative >= at->length - minimumSegmentLength)
+        return {false, {}, "Split outside clip interior", {}};
+
+    ClipSplitEditResult result;
+    result.rightClipId = mintId(at->id + "_cut");
+    if (result.rightClipId.empty())
+        return {false, {}, "Cannot allocate split identity", {}};
+
+    const auto partitionChildren = [&] (auto&& self,
+                                        std::vector<Clip> source,
+                                        const double cut,
+                                        std::vector<Clip>& left,
+                                        std::vector<Clip>& right) -> bool
+    {
+        left.clear();
+        right.clear();
+        left.reserve(source.size());
+        right.reserve(source.size());
+
+        for (auto& child : source)
+        {
+            const double childStart = child.start;
+            const double childEnd = child.start + child.length;
+            if (childEnd <= cut + 1.0e-9)
+            {
+                left.push_back(std::move(child));
+                continue;
+            }
+            if (childStart >= cut - 1.0e-9)
+            {
+                child.start -= cut;
+                right.push_back(std::move(child));
+                continue;
+            }
+
+            const double childCut = cut - childStart;
+            if (childCut <= 0.0 || childCut >= child.length)
+                return false;
+
+            Clip leftChild = child;
+            Clip rightChild = std::move(child);
+            const double originalLength = leftChild.length;
+            rightChild.id = mintId(leftChild.id + "_cut");
+            if (rightChild.id.empty()) { return false; }
+
+            leftChild.length = childCut;
+            leftChild.fadeOut = 0.0;
+            rightChild.start = 0.0;
+            rightChild.length = originalLength - childCut;
+            rightChild.fadeIn = 0.0;
+            rightChild.fadeOut = 0.0;
+
+            if (leftChild.isContainer())
+            {
+                std::vector<Clip> leftNested, rightNested;
+                if (!self(self, std::move(leftChild.children), childCut,
+                          leftNested, rightNested))
+                    return false;
+                leftChild.children = std::move(leftNested);
+                rightChild.children = std::move(rightNested);
+            }
+
+            result.lineage.push_back(
+                {leftChild.id, rightChild.id, childCut / originalLength});
+            left.push_back(std::move(leftChild));
+            right.push_back(std::move(rightChild));
+        }
+        return true;
+    };
+
+    Clip left = *at;
+    Clip right = *at;
+    const double originalLength = left.length;
+    right.id = result.rightClipId;
+    left.length = relative;
+    left.fadeOut = 0.0;
+    right.start = splitTime;
+    right.length = originalLength - relative;
+    right.fadeIn = 0.0;
+    right.fadeOut = 0.0;
+
+    if (left.isContainer())
+    {
+        std::vector<Clip> leftChildren, rightChildren;
+        if (!partitionChildren(partitionChildren, std::move(left.children),
+                               relative, leftChildren, rightChildren))
+            return {false, {}, "Cannot partition nested arrangement", {}};
+        left.children = std::move(leftChildren);
+        right.children = std::move(rightChildren);
+    }
+
+    result.lineage.insert(result.lineage.begin(),
+                          {left.id, right.id, relative / originalLength});
+    *at = std::move(left);
+    siblings.insert(at + 1, std::move(right));
+    result.ok = true;
+    return result;
 }
 Capabilities capabilities(const Track& t, Mode mode) noexcept
 {
@@ -144,11 +448,11 @@ std::string validate(const Session& s)
         if(t.mute && t.solo) return "Mute e Solo non simultanei";
         if(!std::isfinite(t.gain) || t.gain < -60 || t.gain >12 || !std::isfinite(t.pan) || t.pan < -1 || t.pan >1) return "Gain/Pan non validi";
         if(t.clips.size()>64) return "Troppe clip fixture";
+        std::size_t totalClips = 0;
         for(const auto& c:t.clips)
         {
-            if(c.id.empty() || c.id.size()>128 || !clips.insert(c.id).second || c.name.size()>256) return "ID clip duplicato / nome troppo lungo";
-            if(c.channels<1 || c.channels>t.audioChannels || c.seed<0 || c.seed>100000 || !std::isfinite(c.start) || c.start<0 || c.start>3600 || !std::isfinite(c.length) || c.length<0.125 || c.length>3600) return "Range clip non valido";
-            if(!std::isfinite(c.fadeIn) || !std::isfinite(c.fadeOut) || c.fadeIn<0 || c.fadeOut<0 || c.fadeIn+c.fadeOut>c.length+1.0e-9) return "Fade non validi";
+            if (!validateClipTree(c, t, clips, totalClips, 0))
+                return "Albero clip non valido";
         }
     }
     if(mainCount!=1) return "Serve esattamente una Song Main";
@@ -211,8 +515,7 @@ void Store::select(const std::string& id,Selection how)
 void Store::selectClip(const std::string& id)
 {
     for(const auto& t:current.tracks)
-        for(const auto& c:t.clips)
-            if(c.id==id){current.selectedClip=id;notify();return;}
+        if(findClip(t,id)!=nullptr){current.selectedClip=id;notify();return;}
 }
 bool Store::removeClip (const std::string& trackId, const std::string& clipId)
 {
@@ -220,14 +523,22 @@ bool Store::removeClip (const std::string& trackId, const std::string& clipId)
     auto* track = findTrack (candidate, trackId);
     if (track == nullptr) { return false; }
 
-    const auto clip = std::find_if (
-        track->clips.begin(), track->clips.end(),
-        [&clipId] (const Clip& value) { return value.id == clipId; });
-    if (clip == track->clips.end()) { return false; }
+    const auto* removedRoot = findClip(*track, clipId);
+    if (removedRoot == nullptr) { return false; }
+    const bool removesSelection = !candidate.selectedClip.empty()
+        && findClip(*removedRoot, candidate.selectedClip) != nullptr;
 
-    track->clips.erase (clip);
-    if (candidate.selectedClip == clipId)
-        candidate.selectedClip.clear();
+    const auto removeFrom = [&clipId](auto&& self, std::vector<Clip>& clips) -> bool
+    {
+        const auto clip = std::find_if(clips.begin(), clips.end(),
+            [&clipId](const Clip& value) { return value.id == clipId; });
+        if (clip != clips.end()) { clips.erase(clip); return true; }
+        for (auto& candidate : clips)
+            if (self(self, candidate.children)) { return true; }
+        return false;
+    };
+    if (!removeFrom(removeFrom, track->clips)) { return false; }
+    if (removesSelection) { candidate.selectedClip.clear(); }
     return commit (std::move (candidate), "Elimina Clip");
 }
 bool Store::toggle(const std::string& id,Flag f)

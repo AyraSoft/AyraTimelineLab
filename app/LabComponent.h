@@ -38,7 +38,12 @@ public:
     std::function<void(const clips::TimelinePointerContext&)>
         onTimelineContextMenuRequested;
     std::function<void(const std::string&)> onPanelHeightCycle;
-    std::function<std::function<void(bool)>(const std::string&,const std::string&)> onPrepareTemporalGroup;
+    std::function<std::function<void()>(const std::string&,const std::string&)> onPrepareGlue;
+    std::function<void(const std::string&,const std::string&,
+                       juce::Component&,juce::Rectangle<int>)> onOpenClipContainer;
+    /** Optional document-owner split path. The panel fixture installs this to
+        expand one cut across relation-linked clips in a single transaction. */
+    std::function<std::string(const std::string&,const std::string&,double)> onSplitClip;
     void updateClipFade(const std::string& trackId, const std::string& clipId, double fadeIn, double fadeOut);
     /** Commits the structural split and returns the committed right-hand clip id.
         An empty id means the model rejected the operation. */

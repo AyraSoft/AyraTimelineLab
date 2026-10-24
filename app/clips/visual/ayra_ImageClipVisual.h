@@ -183,6 +183,7 @@ struct ImageFrameVisual
     float endNormX   = 0.1f;          ///< Fine dello slot nella clip [0..1]
     int sourceFrameIndex = 0;         ///< Indice del fotogramma sorgente (0-based)
     juce::Image thumbnail {};         ///< Bitmap pre-scalata opzionale fornita dall'host
+    float inheritedOpacityScale = 1.0f; ///< Gain dei container antenati.
 };
 
 /** Proiezione completa, non autorevole, necessaria al paint di una ImageClip.
@@ -215,6 +216,7 @@ struct ImageClipVisual
     // Slot fotogrammi visibili (gia' mappati attraverso il Warp)
     const ImageFrameVisual* frames = nullptr;
     int numFrames = 0;
+    std::vector<ImageFrameVisual> ownedPreviewFrames;
 
     // Inviluppo di Opacita' (0% .. 100%)
     float baseOpacity = 1.0f;
@@ -236,6 +238,9 @@ struct ImageClipVisual
     bool isSlipActive = false;
     ClipOverlapVisual overlap;
     ClipCommonStateVisual state;
+    ClipContainerVisual container;
+    const ImageClipVisual* containedClipPreviews = nullptr;
+    int numContainedClipPreviews = 0;
 };
 
 } // namespace ayra::lab::clips

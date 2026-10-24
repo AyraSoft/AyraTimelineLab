@@ -96,6 +96,124 @@ int main()
     check(!store.removeClip("missing", clipToDelete)
           && !store.removeClip("voice", "missing"),
           "clip deletion accepted an unknown owner or id");
+    {
+        auto grouped = store.state();
+        auto* track = findTrack(grouped, "voice");
+        const auto firstId = track->clips[0].id;
+        const auto secondId = track->clips[1].id;
+        const auto firstStart = track->clips[0].start;
+        const auto secondEnd = track->clips[1].start + track->clips[1].length;
+        const auto glue = createClipContainer(
+            *track, {}, {firstId, secondId}, "voice.glue.1");
+        check(glue && glue.containerId == "voice.glue.1",
+              "Glue did not create a real container");
+        const auto* container = findClip(*track, glue.containerId);
+        check(container && container->children.size() == 2,
+              "Glue did not reparent both clips");
+        check(container->start == firstStart
+              && container->length == secondEnd - firstStart,
+              "container does not span the full child union");
+        check(container->children[0].id == firstId
+              && container->children[0].start == 0.0,
+              "first child identity or relative time changed");
+        check(findClip(*track, secondId) != nullptr,
+              "recursive clip lookup lost a child");
+        check(validate(grouped).empty(), "valid container tree rejected");
+
+        Store groupedStore(grouped);
+        groupedStore.selectClip(firstId);
+        check(groupedStore.removeClip("voice", glue.containerId),
+              "container deletion with a selected child was rejected");
+        check(groupedStore.state().selectedClip.empty()
+              && findClip(*findTrack(groupedStore.state(), "voice"), firstId) == nullptr,
+              "container deletion left a dangling child selection");
+
+        const auto nested = createClipContainer(
+            *track, glue.containerId,
+            {firstId, secondId}, "voice.glue.2");
+        check(nested && findClip(*track, nested.containerId)->children.size() == 2,
+              "nested Glue failed");
+        check(dissolveClipContainer(*track, nested.containerId),
+              "nested Dissolve failed");
+        check(findClip(*track, firstId) != nullptr
+              && findClip(*track, secondId) != nullptr,
+              "Dissolve did not restore child identities");
+        findClip(*track,glue.containerId)->length=0.5;
+        check(validate(grouped).empty(),
+              "trimmed container incorrectly truncated its internal source");
+        check(dissolveClipContainer(*track, glue.containerId),
+              "root Dissolve failed");
+        check(track->clips[0].id == firstId && track->clips[1].id == secondId,
+              "Dissolve did not restore sibling order");
+
+        Track splitTrack;
+        splitTrack.id = "split";
+        splitTrack.audioChannels = 2;
+        splitTrack.order = {0, 1};
+        splitTrack.clips = {
+            {"left", "Left", 0.0, 2.0, 2, 1},
+            {"right", "Right", 6.0, 2.0, 2, 2}
+        };
+        const auto splitGlue = createClipContainer(
+            splitTrack, {}, {"left", "right"}, "gap.glue");
+        check(static_cast<bool>(splitGlue), "gap Glue setup failed");
+        int minted = 0;
+        const auto splitResult = splitClip(
+            splitTrack, "gap.glue", 4.0,
+            [&minted](const std::string& base)
+            {
+                return base + "." + std::to_string(++minted);
+            });
+        check(splitResult && splitTrack.clips.size() == 2,
+              "container split failed");
+        check(splitTrack.clips[0].children.size() == 1
+              && splitTrack.clips[0].children[0].id == "left"
+              && splitTrack.clips[1].children.size() == 1
+              && splitTrack.clips[1].children[0].id == "right",
+              "split duplicated children across a source gap");
+        check(splitTrack.clips[1].children[0].start == 2.0,
+              "right source window did not preserve the internal gap");
+        check(dissolveClipContainer(splitTrack, splitTrack.clips[1].id)
+              && dissolveClipContainer(splitTrack, "gap.glue"),
+              "split containers could not be dissolved");
+        check(splitTrack.clips.size() == 2
+              && splitTrack.clips[0].id == "left"
+              && splitTrack.clips[1].id == "right",
+              "Dissolve after split duplicated or lost source clips");
+
+        Track crossingTrack;
+        crossingTrack.id = "crossing";
+        crossingTrack.audioChannels = 2;
+        crossingTrack.order = {0, 1};
+        crossingTrack.clips = {
+            {"long", "Long", 1.0, 6.0, 2, 3},
+            {"tail", "Tail", 8.0, 1.0, 2, 4}
+        };
+        check(static_cast<bool>(createClipContainer(
+                  crossingTrack, {}, {"long", "tail"}, "cross.glue")),
+              "crossing Glue setup failed");
+        minted = 0;
+        const auto crossing = splitClip(
+            crossingTrack, "cross.glue", 4.0,
+            [&minted](const std::string& base)
+            {
+                return base + "." + std::to_string(++minted);
+            });
+        check(crossing && crossing.lineage.size() == 2,
+              "crossing child split lineage is incomplete");
+        check(crossingTrack.clips[0].children[0].length == 3.0
+              && crossingTrack.clips[1].children[0].length == 3.0
+              && crossingTrack.clips[0].children[0].id !=
+                 crossingTrack.clips[1].children[0].id,
+              "crossing child was cloned instead of divided");
+
+        auto invalid = grouped;
+        auto* invalidTrack = findTrack(invalid, "voice");
+        invalidTrack->clips[0].children.push_back(invalidTrack->clips[1]);
+        invalidTrack->clips[0].children.back().start = invalidTrack->clips[0].length;
+        check(!validate(invalid).empty(),
+              "duplicate nested clip identity was accepted");
+    }
     auto corrupt=store.state();corrupt.manualOrder.pop_back();
     auto checkpoint=store.state();check(!store.replace(corrupt) && store.state()==checkpoint,"bad import atomic");
     corrupt=checkpoint;corrupt.tracks[0].clips[0].fadeIn=999;

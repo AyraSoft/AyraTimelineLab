@@ -3,9 +3,18 @@
 #include <unordered_set>
 #include <memory>
 #include <functional>
+#include <limits>
+#include <string>
+#include <vector>
 
 namespace ayra::lab
 {
+struct ClipSplitView
+{
+    std::string leftClipId,rightClipId;
+    float fraction=0.5f;
+};
+
 /** Adapter only: converts the legacy 32-second fixture's geometry using the
     canonical time window. Never scales or widens the JUCE canvas component. */
 struct CanvasViewportBinding
@@ -14,8 +23,11 @@ struct CanvasViewportBinding
     ayra::timeline::TimelineTimeWindow time;
     juce::Colour ownerColour;
     std::function<void()> cycleHeight; // presentation-only; installed by the host
-    std::function<std::function<void(bool)>(const std::string&)> prepareTemporalGroup;
+    std::function<std::function<void()>(const std::string&)> prepareGlue;
+    std::function<void(const std::string&,juce::Component&,juce::Rectangle<int>)> openContainerEditor;
     std::shared_ptr<const std::unordered_set<std::string>> canonicalClipIds;
+    std::uint64_t documentProjectionRevision=std::numeric_limits<std::uint64_t>::max();
+    std::vector<ClipSplitView> clipSplits;
     bool containsCanonicalClip(const std::string& id)const
     {return canonicalClipIds&&canonicalClipIds->contains(id);}
     double pixelsPerSecond(int width)const noexcept

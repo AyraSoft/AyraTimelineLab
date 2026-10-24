@@ -90,13 +90,16 @@ ctest --test-dir build/core --output-on-failure
 
 ### Confini
 
-`--legacy` e `--session "file.json"` preservano il vecchio banco e il codec v1;
-l'HTML incluso resta la sua specifica storica, non la nuova GUI. La demo del nuovo
-pannello è in memoria: non esporta un JSON v1 che perderebbe owner e relazioni.
+`--legacy` e `--session "file.json"` preservano il vecchio banco; il codec legge
+anche i formati v1/v2 e scrive il v3, che distingue esplicitamente una EditSource
+container anche quando una finestra ottenuta con split non contiene clip. L'HTML incluso
+resta la specifica storica, non la nuova GUI del pannello.
 
-Gruppo temporale, link cross-lane e gruppi di disposizione sono distinti. Il gruppo
-temporale è ancora relazione reversibile, **non Glue PCM né un contenitore visuale
-unificato**. I canvas Point/Span/Continuous conservano l'editing locale esistente;
+Container Glue, link cross-lane e gruppi di disposizione sono distinti. Glue
+reparenta clip sorelle in una clip annidabile con Warp/Gain propri; i figli chiusi
+sono preview-only e si editano nel canvas temporaneo del CallOutBox. Nella fixture
+questa forma corrisponde a `ayra::timeline::EditSource`, che resta l'owner prodotto.
+I canvas Point/Span/Continuous conservano l'editing locale esistente;
 lo stato sopravvive allo smontaggio ma non acquista per questo Undo documentale,
 Split/Stretch source-aware cross-owner o persistenza canonica.
 

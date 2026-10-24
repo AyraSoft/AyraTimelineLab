@@ -89,10 +89,15 @@ void ClipDefaultLookAndFeel::drawImageClip (
     bodyPath.addRoundedRectangle (v.bounds, corner);
 
     // 1. Fondo base della Clip in tinta (identico a drawAudioClip: emerge quando l'opacita' scende)
-    const auto topCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.35f)
-                                   : tint.withAlpha (0.92f);
-    const auto botCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.55f)
-                                   : tint.darker (0.25f).withAlpha (0.88f);
+    auto topCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.35f)
+                             : tint.withAlpha (0.92f);
+    auto botCol = v.selected ? tint.interpolatedWith (juce::Colour (0xff0b1a24), 0.55f)
+                             : tint.darker (0.25f).withAlpha (0.88f);
+    if (v.container.isContainer())
+    {
+        topCol = topCol.darker (0.34f);
+        botCol = botCol.darker (0.42f);
+    }
     {
         juce::ColourGradient grad (topCol, v.bounds.getX(), v.bounds.getY(),
                                    botCol, v.bounds.getX(), v.bounds.getBottom(), false);
@@ -116,7 +121,7 @@ void ClipDefaultLookAndFeel::drawImageClip (
             v.bounds.getWidth(), envelopeHeight);
 
         // 2. Filmstrip Fotogrammi A TUTTA ALTEZZA (Full-Bleed da top a bottom della clip)
-        if (v.frames != nullptr && v.numFrames > 0)
+        if (!v.container.isContainer() && v.frames != nullptr && v.numFrames > 0)
         {
             for (int i = 0; i < v.numFrames; ++i)
             {
@@ -133,7 +138,8 @@ void ClipDefaultLookAndFeel::drawImageClip (
                 const float midNormX = juce::jlimit (0.0f, 1.0f, (fr.startNormX + fr.endNormX) * 0.5f);
                 const float frameOpacity = clip_opacity_law::evaluateOpacityAt (
                     v.opacityPoints, v.numOpacityPoints, v.baseOpacity, midNormX,
-                    v.fadeInControl, v.fadeOutControl);
+                    v.fadeInControl, v.fadeOutControl)
+                    * juce::jlimit (0.0f, 16.0f, fr.inheritedOpacityScale);
 
                 if (fr.thumbnail.isValid())
                 {
@@ -300,7 +306,11 @@ void ClipDefaultLookAndFeel::drawImageClip (
         }
 
         drawClipOverlapDecoration (g, v.bounds, curveBounds, v.overlap);
+        for (int i = 0; i < v.numContainedClipPreviews; ++i)
+            drawImageClip (g, v.containedClipPreviews[i], component);
+        drawContainerGainEnvelope (g, v.bounds, v.container, tint);
         drawClipStateAndAuditionOverlay (g, v.bounds, v.state, tint);
+        drawClipContainerFrame (g, v.bounds, v.container, tint);
 
         // 5. Linea dell'Opacita' continua (0% .. 100%) — visibile a zoom medio e grande (showGainEnvelope)
         //    ZERO allocazioni heap durante il paint (buffer inline su stack).

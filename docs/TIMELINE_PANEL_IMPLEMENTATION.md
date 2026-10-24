@@ -17,8 +17,9 @@ Nessuna modifica a `ayra_multiverse` è inclusa nella consegna.
 | `modules/ayra_timeline_panel/TimelinePanel.h` | Componenti residenti limitati, composizione senza header, input e menu visibilità |
 | `app/CanvasViewportBinding.h` | Conversione viewport condivisa per paint e input degli adattatori legacy |
 | `demo/PanelClipWindow.h` | Proiezione fixture delle sole clip visibili tramite indice canonico |
-| `demo/TimelinePanelDemo.cpp` | App a 19 lane, collegamento canvas, cache stati, adattatore artwork Ayra e meter sintetici |
+| `demo/TimelinePanelDemo.cpp` | App a 19 lane, collegamento canvas, editor Glue in CallOutBox, cache stati, adattatore artwork Ayra e meter sintetici |
 | `demo/PanelFixture.h` | Owner e transazioni del solo progetto dimostrativo |
+| `core/LabModel.*` | Albero fixture ricorsivo delle clip container; analogo locale di `ayra::timeline::EditSource` |
 | `app/clips/*/*Canvas.cpp` | Adattamento viewport, conservazione stato e navigazione degli editor esistenti |
 | `tests/NativePanelTests.cpp` | Test del pannello JUCE reale con canvas strumentati |
 
@@ -71,9 +72,14 @@ La demo conserva punti/note/warp mentre i componenti vengono smontati.
 ## Limiti ancora aperti
 
 - I meter sono un collaudo visivo sintetico, non DSP. Open apre un inspector fixture.
-- La nuova demo è in memoria. Non esiste un export/import completo del progetto
-  nuovo; il JSON v1 resta del vecchio banco.
-- Gruppo temporale è relazione reversibile, non unico contenitore visuale o Glue PCM.
+- La nuova demo è in memoria. Il JSON fixture v3 conserva ricorsivamente i
+  container e il loro tipo esplicito; legge ancora v1/v2. Non sostituisce la
+  persistenza ValueTree del modulo prodotto.
+- Glue crea una clip container reale e annidabile: i figli sono preview-only da
+  chiusa e diventano editabili nel canvas temporaneo aperto dal corpo. Il mapping
+  prodotto resta `ayra::timeline::EditSource`, non il modello sintetico del Lab.
+- I gruppi di layout restano nel `ViewState`; parentesi e badge per-riga consumano
+  la proiezione indicizzata del Controller e non possiedono membership parallele.
   I link supportano le transazioni fixture documentate, non ogni split/stretch
   source-aware cross-owner. I comandi non supportati non fingono un risultato.
 - Point/Span/Continuous hanno navigazione reale dei loro eventi locali e stato

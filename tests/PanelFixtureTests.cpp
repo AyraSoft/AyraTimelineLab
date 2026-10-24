@@ -63,72 +63,84 @@ void relations()
     CHECK(store.undo());CHECK(start(store,"voice.midi","voice.midi.one")==2);CHECK(!store.canUndo());
     CHECK(store.redo());CHECK(start(store,"voice.image","voice.image.one")==3);
     CHECK(store.undo());
-    // Distinct temporal group composes with the explicit vertical link, exactly once per clip.
-    auto group=command(host,panel::CommandKind::temporalGroup);
-    group.events={{"voice.audio","voice.audio.one"},{"voice.audio","voice.audio.two"}};CHECK(host.apply(group));
+    // A linked member cannot be reparented into a horizontal container.
+    auto group=command(host,panel::CommandKind::glueClips);
+    group.events={{"voice.audio","voice.audio.one"},{"voice.audio","voice.audio.two"}};CHECK(!host.apply(group));
     auto move=command(host,panel::CommandKind::moveClips);move.events={{"voice.audio","voice.audio.two"}};move.deltaSeconds=1;
     CHECK(host.apply(move));CHECK(start(store,"voice.audio","voice.audio.two")==11);
-    CHECK(start(store,"voice.audio","voice.audio.one")==3);CHECK(start(store,"voice.midi","voice.midi.one")==3);
+    CHECK(start(store,"voice.audio","voice.audio.one")==2);CHECK(start(store,"voice.midi","voice.midi.one")==2);
     candidate=store.state();fixtureClip(candidate,{"voice.audio","voice.audio.two"})->start=7;
-    CHECK(!store.commit(candidate,"Would push linked first clip below zero"));
-    CHECK(start(store,"voice.audio","voice.audio.two")==11);CHECK(start(store,"voice.audio","voice.audio.one")==3);
+    CHECK(store.commit(candidate,"Independent sibling move"));
+    CHECK(start(store,"voice.audio","voice.audio.two")==7);CHECK(start(store,"voice.audio","voice.audio.one")==2);
     candidate=store.state();fixtureClip(candidate,{"voice.audio","voice.audio.one"})->fadeIn=1;
     CHECK(store.commit(candidate,"Independent fade"));
     CHECK(fixtureClip(store.state(),{"voice.midi","voice.midi.one"})->fadeIn==0.5);
     candidate=store.state();fixtureClip(candidate,{"voice.audio","voice.audio.one"})->start+=1;
     fixtureClip(candidate,{"voice.midi","voice.midi.one"})->start+=2;
-    CHECK(!store.commit(candidate,"Conflicting deltas"));CHECK(start(store,"voice.audio","voice.audio.one")==3);
+    CHECK(!store.commit(candidate,"Conflicting deltas"));CHECK(start(store,"voice.audio","voice.audio.one")==2);
     candidate=store.state();auto meta=std::make_shared<PanelFixtureMetadata>(*candidate.panelMetadata);
     meta->locked.insert({"voice.image","voice.image.one"});candidate.panelMetadata=meta;CHECK(store.commit(candidate,"Lock peer"));
     candidate=store.state();fixtureClip(candidate,{"voice.audio","voice.audio.one"})->start+=1;
-    CHECK(!store.commit(candidate,"Locked peer"));CHECK(start(store,"voice.audio","voice.audio.one")==3);
+    CHECK(!store.commit(candidate,"Locked peer"));CHECK(start(store,"voice.audio","voice.audio.one")==2);
     CHECK(store.undo());
     auto erase=command(host,panel::CommandKind::deleteClips);erase.events={{"voice.audio","voice.audio.one"}};
     CHECK(host.apply(erase));CHECK(!fixtureClip(store.state(),{"voice.audio","voice.audio.one"}));
-    CHECK(!fixtureClip(store.state(),{"voice.midi","voice.midi.one"}));CHECK(!fixtureClip(store.state(),{"voice.audio","voice.audio.two"}));
-    CHECK(panel::validate(host.snapshot()));CHECK(store.undo());CHECK(start(store,"voice.audio","voice.audio.one")==3);
+    CHECK(!fixtureClip(store.state(),{"voice.midi","voice.midi.one"}));CHECK(fixtureClip(store.state(),{"voice.audio","voice.audio.two"}));
+    CHECK(panel::validate(host.snapshot()));CHECK(store.undo());CHECK(start(store,"voice.audio","voice.audio.one")==2);
     auto unlink=command(host,panel::CommandKind::unlinkClips);unlink.events={{"voice.midi","voice.midi.one"}};CHECK(host.apply(unlink));
     candidate=store.state();fixtureClip(candidate,{"voice.midi","voice.midi.one"})->start+=1;
-    CHECK(store.commit(candidate,"Detached move"));CHECK(start(store,"voice.midi","voice.midi.one")==4);
-    CHECK(start(store,"voice.audio","voice.audio.one")==3);
+    CHECK(store.commit(candidate,"Detached move"));CHECK(start(store,"voice.midi","voice.midi.one")==3);
+    CHECK(start(store,"voice.audio","voice.audio.one")==2);
 }
-void groupingTargetsAndUnion()
+void glueContainers()
 {
     Store store(makePanelFixture());PanelFixtureHost host(store);
     auto snapshot=host.snapshot();std::vector<panel::EventRef> refs;
     const std::string lane="guitar.audio",one=lane+".one",two=lane+".two",three=lane+".three";
-    CHECK(panel::temporalGroupTargets(snapshot,lane,one,{},false,refs));
+    CHECK(panel::glueContainerTargets(snapshot,lane,one,{},refs));
     CHECK(refs==std::vector<panel::EventRef>({{lane,one},{lane,two}}));
-    CHECK(!panel::temporalGroupTargets(snapshot,lane,three,{},false,refs));
-    CHECK(!panel::temporalGroupTargets(snapshot,lane,"missing",{},true,refs));
-    CHECK(panel::temporalGroupTargets(snapshot,lane,two,{{lane,one},{lane,three},{"voice.midi","voice.midi.one"}},false,refs));
+    CHECK(!panel::glueContainerTargets(snapshot,lane,three,{},refs));
+    CHECK(!panel::glueContainerTargets(snapshot,lane,"missing",{},refs));
+    const std::vector<panel::EventRef> nonAdjacent{{lane,one},{lane,three},{"voice.midi","voice.midi.one"}};
+    CHECK(panel::glueContainerTargets(snapshot,lane,two,nonAdjacent,refs));
     CHECK(refs==std::vector<panel::EventRef>({{lane,one},{lane,three}}));
-    CHECK(panel::temporalGroupTargets(snapshot,lane,one,{},true,refs));CHECK(refs.size()==3);
-    // Group resolution is document-wide, even for clips outside the visible window.
     std::reverse(snapshot.events.begin(),snapshot.events.end());
-    CHECK(panel::temporalGroupTargets(snapshot,lane,one,{},true,refs));CHECK(refs.front().clip==one&&refs.back().clip==three);
+    CHECK(panel::glueContainerTargets(snapshot,lane,two,nonAdjacent,refs));
+    CHECK(refs==std::vector<panel::EventRef>({{lane,one},{lane,three}}));
     const auto verticalBefore=std::find_if(snapshot.relations.begin(),snapshot.relations.end(),[](const auto& rel){return rel.kind==panel::RelationKind::clipLink;})->members;
-    auto group=command(host,panel::CommandKind::temporalGroup);group.events={{lane,one},{lane,two}};
-    CHECK(host.apply(group));const auto afterPair=store.state();
-    group=command(host,panel::CommandKind::temporalGroup);group.events={{lane,two},{lane,three}};
-    CHECK(host.apply(group));
-    const auto& rels=store.state().panelMetadata->relations;
-    const auto merged=std::find_if(rels.begin(),rels.end(),[&](const auto& rel){return rel.kind==panel::RelationKind::temporalGroup&&rel.members[0].lane==lane;});
-    CHECK(merged!=rels.end()&&merged->members.size()==3);CHECK(panel::validate(host.snapshot()));
-    CHECK(std::find_if(rels.begin(),rels.end(),[](const auto& rel){return rel.kind==panel::RelationKind::clipLink;})->members==verticalBefore);
-    // A repeat does not write a redundant relation or create another undo item.
-    const auto revision=host.snapshot().revision;
-    group=command(host,panel::CommandKind::temporalGroup);group.events=refs;CHECK(host.apply(group));
-    CHECK(host.snapshot().revision==revision);CHECK(store.undo());CHECK(store.state()==afterPair);
-    CHECK(store.redo());
-    // Lock any member pulled into the union, not just explicitly selected clips.
+    auto glue=command(host,panel::CommandKind::glueClips);glue.events={{lane,one},{lane,two}};
+    CHECK(host.apply(glue));
+    auto* track=findTrack(store.state(),lane);CHECK(track&&track->clips.size()==2);
+    auto container=std::find_if(track->clips.begin(),track->clips.end(),[](const auto& clip){return clip.isContainer();});
+    CHECK(container!=track->clips.end());CHECK(container->children.size()==2);
+    CHECK(container->children[0].id==one&&container->children[0].start==0);
+    CHECK(container->children[1].id==two&&container->children[1].start==8);
+    CHECK(std::find_if(store.state().panelMetadata->relations.begin(),store.state().panelMetadata->relations.end(),
+        [](const auto& rel){return rel.kind==panel::RelationKind::clipLink;})->members==verticalBefore);
+    CHECK(panel::validate(host.snapshot()));
+
+    const auto innerId=container->id;
+    glue=command(host,panel::CommandKind::glueClips);glue.events={{lane,innerId},{lane,three}};
+    CHECK(host.apply(glue));track=findTrack(store.state(),lane);CHECK(track->clips.size()==1);
+    CHECK(track->clips.front().children.size()==2);
+    CHECK(track->clips.front().children.front().id==innerId);
+    CHECK(track->clips.front().children.front().children.size()==2);
+
+    auto dissolve=command(host,panel::CommandKind::dissolveContainer);
+    dissolve.events={{lane,track->clips.front().id}};CHECK(host.apply(dissolve));
+    track=findTrack(store.state(),lane);CHECK(track->clips.size()==2);
+    CHECK(findClip(*track,innerId)&&findClip(*track,three));
+    dissolve=command(host,panel::CommandKind::dissolveContainer);dissolve.events={{lane,innerId}};
+    CHECK(host.apply(dissolve));CHECK(findTrack(store.state(),lane)->clips.size()==3);
+    CHECK(store.undo());CHECK(findTrack(store.state(),lane)->clips.size()==2);
+
     auto candidate=store.state();auto meta=std::make_shared<PanelFixtureMetadata>(*candidate.panelMetadata);
-    meta->locked.insert({lane,three});candidate.panelMetadata=meta;CHECK(store.commit(candidate,"Lock group member"));
-    const auto lockedState=store.state();group=command(host,panel::CommandKind::temporalGroup);group.events={{lane,one},{lane,two}};
-    CHECK(!host.apply(group));CHECK(store.state()==lockedState);
-    snapshot=host.snapshot();CHECK(!panel::temporalGroupTargets(snapshot,lane,one,{},true,refs));
-    CHECK(store.undo());CHECK(store.undo());CHECK(store.undo());
-    CHECK(!store.canUndo()); // group creation + merge were each exactly one transaction
+    meta->locked.insert({lane,innerId});candidate.panelMetadata=meta;CHECK(store.commit(candidate,"Lock container"));
+    const auto lockedState=store.state();dissolve=command(host,panel::CommandKind::dissolveContainer);dissolve.events={{lane,innerId}};
+    CHECK(!host.apply(dissolve));CHECK(store.state()==lockedState);
+    auto linkedGlue=command(host,panel::CommandKind::glueClips);
+    linkedGlue.events={{"voice.audio","voice.audio.one"},{"voice.audio","voice.audio.two"}};
+    CHECK(!host.apply(linkedGlue));
     // Explicit host minimums are not bypassed by the compact presentation profile.
     panel::Controller controller;snapshot=host.snapshot();
     for(auto& l:snapshot.lanes)if(l.id==lane)l.minimumHeight=80;
@@ -163,6 +175,45 @@ void failuresAndLifetime()
     CHECK(!store.prepareCommit); const int previous=calls;
     store.selectClip("voice.audio.one");CHECK(calls==previous+1);
 }
+void relationAwareSplit()
+{
+    Store store(makePanelFixture());PanelFixtureHost host(store);const auto before=store.state();
+    const auto split=host.splitClip("voice.audio","voice.audio.one",5.0);CHECK(split.result);
+    CHECK(split.rightClipId=="voice.audio.one_cut");
+    for(const std::string lane:{"voice.audio","voice.midi","voice.image"})
+    {
+        const auto* left=fixtureClip(store.state(),{lane,lane+".one"});
+        const auto* right=fixtureClip(store.state(),{lane,lane+".one_cut"});
+        CHECK(left&&right);CHECK(left->start==2&&left->length==3);
+        CHECK(right->start==5&&right->length==3);
+    }
+    const auto& relations=store.state().panelMetadata->relations;
+    CHECK(relations.size()==before.panelMetadata->relations.size()+1);
+    CHECK(std::count_if(relations.begin(),relations.end(),[](const auto& relation)
+        {return relation.kind==panel::RelationKind::clipLink;})==2);
+    CHECK(panel::validate(host.snapshot()));CHECK(store.undo());CHECK(store.state()==before);
+}
+void containerSplitDoesNotDuplicate()
+{
+    Store store(makePanelFixture());PanelFixtureHost host(store);
+    const std::string lane="backing.audio";
+    const auto split=host.splitClip(lane,"backing.audio.glue",9.0);CHECK(split.result);
+    const auto* track=findTrack(store.state(),lane);CHECK(track);
+    const auto* left=findClip(*track,"backing.audio.glue");
+    const auto* right=findClip(*track,split.rightClipId);
+    CHECK(left&&right&&left->isContainer()&&right->isContainer());
+    CHECK(left->children.size()==1&&left->children.front().id=="backing.audio.one");
+    CHECK(right->children.size()==1&&right->children.front().id=="backing.audio.two");
+    CHECK(right->children.front().start==1.0);
+    CHECK(panel::validate(host.snapshot()));
+
+    auto dissolve=command(host,panel::CommandKind::dissolveContainer);
+    dissolve.events={{lane,left->id},{lane,right->id}};CHECK(host.apply(dissolve));
+    track=findTrack(store.state(),lane);CHECK(track&&track->clips.size()==3);
+    CHECK(track->clips[0].id=="backing.audio.one");
+    CHECK(track->clips[1].id=="backing.audio.two");
+    CHECK(track->clips[2].id=="backing.audio.three");
+}
 void visibleClipProjection()
 {
     Track source;source.id="dense";
@@ -178,4 +229,4 @@ void visibleClipProjection()
     source.clips.erase(source.clips.begin());window.update(source,2);CHECK(!window.canonicalIds->contains("0"));
 }
 }
-int main(){groupingTargetsAndUnion();visibleClipProjection();controls();relations();failuresAndLifetime();std::cout<<"PASS "<<count<<" fixture/transaction checks\n";}
+int main(){glueContainers();containerSplitDoesNotDuplicate();visibleClipProjection();controls();relations();failuresAndLifetime();relationAwareSplit();std::cout<<"PASS "<<count<<" fixture/transaction checks\n";}

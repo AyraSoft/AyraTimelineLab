@@ -10,6 +10,7 @@
 #include "ayra_CurveProvider.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <string>
@@ -17,6 +18,7 @@
 #include <vector>
 
 #include "component/ayra_CutRailGroupGesture.h"
+#include "component/ayra_ClipSplitReconciliation.h"
 #include "visual/ayra_ClipVisual.h"
 #include "visual/ayra_ImageClipVisual.h"
 #include "component/ayra_ClipComponent.h"

@@ -23,8 +23,18 @@ inline juce::String text(const std::string& s){return juce::String::fromUTF8(s.c
 struct PanelStyle
 {
     juce::Colour background{0xff181c23},seam{0xff222730},foreground{0xffd8dde5},border{0xff353c47};
+    std::array<juce::Colour,6> layoutGroupColours{{juce::Colour{0xff48d7c8},juce::Colour{0xff64a8ff},
+                                                   juce::Colour{0xffb780ff},juce::Colour{0xffffbd59},
+                                                   juce::Colour{0xffff7897},juce::Colour{0xff7edb72}}};
     TimelineIdentityTypography identityTypography;
     std::function<juce::Colour(Stream)> streamColour;
+};
+struct LayoutGroupVisual
+{
+    juce::Rectangle<float> bounds;
+    juce::Colour colour;
+    juce::String label;
+    bool joinsAbove=false,joinsBelow=false,labelOnLeft=false;
 };
 /** Native artwork is supplied by the host's existing Ayra design system.
     No Tensor, Lab or Multiverse types belong to this interface. */
@@ -35,6 +45,33 @@ public:
     virtual std::unique_ptr<juce::Button> makeButton(LaneButton)=0;
     virtual void drawAccent(juce::Graphics&,juce::Rectangle<float>,juce::Colour)const=0;
     virtual void drawControlGroup(juce::Graphics&,juce::Rectangle<float>)const {}
+    virtual void drawLayoutGroup(juce::Graphics& g,const LayoutGroupVisual& visual)const
+    {
+        if(visual.bounds.isEmpty())return;
+        const float top=visual.joinsAbove?visual.bounds.getY()-1.0f:visual.bounds.getY()+4.0f;
+        const float bottom=visual.joinsBelow?visual.bounds.getBottom()+1.0f:visual.bounds.getBottom()-5.0f;
+        const auto drawBracket=[&](float x,float direction)
+        {
+            g.setColour(juce::Colours::black.withAlpha(0.82f));
+            g.drawLine(x,top,x,bottom,5.0f);
+            g.setColour(visual.colour.withAlpha(0.92f));
+            g.drawLine(x,top,x,bottom,2.0f);
+            if(!visual.joinsAbove)g.drawLine(x,top,x+direction*8.0f,top,2.0f);
+            if(!visual.joinsBelow)g.drawLine(x,bottom,x+direction*8.0f,bottom,2.0f);
+        };
+        drawBracket(visual.bounds.getX()+5.0f,1.0f);
+        drawBracket(visual.bounds.getRight()-6.0f,-1.0f);
+
+        if(visual.joinsAbove||visual.label.isEmpty()||visual.bounds.getWidth()<84.0f)return;
+        const float badgeWidth=76.0f;
+        const float badgeX=visual.labelOnLeft?visual.bounds.getX()+11.0f
+                                             :visual.bounds.getRight()-badgeWidth-12.0f;
+        const juce::Rectangle<float> badge{badgeX,visual.bounds.getY()+3.0f,badgeWidth,12.0f};
+        g.setColour(juce::Colour(0xe6101820));g.fillRoundedRectangle(badge,3.5f);
+        g.setColour(visual.colour);g.drawRoundedRectangle(badge,3.5f,1.0f);
+        g.setColour(juce::Colours::white);g.setFont(juce::Font(juce::FontOptions().withHeight(8.5f).withStyle("Bold")));
+        g.drawText(visual.label,badge.toNearestInt(),juce::Justification::centred,false);
+    }
     virtual void drawMeter(juce::Graphics&,juce::Rectangle<float>,float)const=0;
     virtual juce::Image prepareIdentity(const TimelineIdentityContent&, const TimelineIdentityLayout&) const { return {}; }
     // Optional real frosted underlay. The panel captures only a padded lens-sized
@@ -421,6 +458,15 @@ private:
                 caps.open=owner->capabilities.open;caps.monitoring=owner->capabilities.monitoring;
             }
             geometry=presentation::layoutTimelineLaneChrome(getWidth(),getHeight(),caps,host.controller.view().chrome);
+            if(const auto* group=host.controller.layoutGroupForRow(row.key))
+            {
+                layoutGroup=*group;
+                layoutGroupLabel="LANE GROUP "+juce::String(static_cast<int>(group->ordinal+1));
+            }
+            else
+            {
+                layoutGroup.reset();layoutGroupLabel.clear();
+            }
             for(std::size_t i=0;i<buttons.size();++i){buttons[i]->setBounds(rectangle(geometry.buttons[i]));buttons[i]->setVisible(!geometry.buttons[i].empty());}
             buttons[2]->setToggleState(owner->muted,juce::dontSendNotification);
             buttons[3]->setToggleState(owner->soloed,juce::dontSendNotification);
@@ -489,6 +535,13 @@ private:
         {
             const auto* owner=host.controller.owner(row.owner);if(!owner)return;
 
+            if(layoutGroup&&!geometry.content.empty())
+            {
+                const auto colour=host.style.layoutGroupColours[layoutGroup->ordinal%host.style.layoutGroupColours.size()];
+                const bool labelOnLeft=host.controller.view().chrome.nameSide==presentation::TimelineNameSide::right;
+                host.painter.drawLayoutGroup(g,{rectangle(geometry.content).toFloat(),colour,layoutGroupLabel,
+                                                layoutGroup->joinsPrevious,layoutGroup->joinsNext,labelOnLeft});
+            }
             if(!geometry.resizeGlyph.empty()){
                 const auto r=rectangle(geometry.resizeGlyph);g.setColour(host.style.foreground.withAlpha(0.75f));
                 g.drawHorizontalLine(r.getY(),static_cast<float>(r.getX()),static_cast<float>(r.getRight()));
@@ -573,6 +626,7 @@ private:
         juce::Image identityUnderlay;juce::Rectangle<int> underlayBounds;
         bool underlayDirty=true;float underlayScale=0.0f;
         std::optional<CanvasFrame> lastFrame;std::uint64_t lastEpoch=0;
+        std::optional<LayoutGroupPresentation> layoutGroup;juce::String layoutGroupLabel;
         MeterReadback input,output;bool accentDown=false,dragging=false,deferredSelection=false,resizing=false;int resizeStart=0;
         void drawMeters(juce::Graphics& g,const MeterReadback& data,presentation::TimelineChromeRect bounds)
         {

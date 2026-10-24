@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ayra::lab
@@ -20,10 +21,27 @@ enum class Flag { mute, solo, enabled, bypass, buffer, oversample, expanded, pin
 
 struct Clip
 {
+    Clip() = default;
+    Clip(std::string clipId, std::string clipName, double clipStart,
+         double clipLength, int clipChannels, int clipSeed,
+         double clipFadeIn = 0.0, double clipFadeOut = 0.0)
+        : id(std::move(clipId)), name(std::move(clipName)), start(clipStart),
+          length(clipLength), channels(clipChannels), seed(clipSeed),
+          fadeIn(clipFadeIn), fadeOut(clipFadeOut)
+    {
+    }
     std::string id, name;
     double start = 0, length = 1;
     int channels = 1, seed = 1;
     double fadeIn = 0, fadeOut = 0;
+    /** Distingue semanticamente una EditSource anche quando la finestra
+        risultante da uno split non contiene eventi visibili. */
+    bool container = false;
+    /** Sotto-arrangement relativo all'inizio del container. Un vettore vuoto
+        identifica una clip foglia. Nel prodotto questa semantica corrisponde
+        a `ayra::timeline::EditSource`; qui resta il solo adapter fixture. */
+    std::vector<Clip> children;
+    [[nodiscard]] bool isContainer() const noexcept { return container; }
     bool operator==(const Clip&) const = default;
 };
 struct Track
@@ -69,6 +87,63 @@ bool parseRole(const std::string&, Role&) noexcept;
 Capabilities capabilities(const Track&, Mode) noexcept;
 const Track* findTrack(const Session&, const std::string&) noexcept;
 Track* findTrack(Session&, const std::string&) noexcept;
+const Clip* findClip(const Clip&, const std::string&) noexcept;
+Clip* findClip(Clip&, const std::string&) noexcept;
+const Clip* findClip(const Track&, const std::string&) noexcept;
+Clip* findClip(Track&, const std::string&) noexcept;
+const Clip* findClip(const Session&, const std::string& trackId,
+                     const std::string& clipId) noexcept;
+Clip* findClip(Session&, const std::string& trackId,
+               const std::string& clipId) noexcept;
+struct ClipSiblingScope
+{
+    std::vector<Clip>* clips = nullptr;
+    std::string parentContainerId;
+};
+/** Trova il vettore canonico che possiede direttamente `clipId`. */
+[[nodiscard]] ClipSiblingScope findClipSiblingScope(Track&, const std::string& clipId) noexcept;
+
+struct ClipContainerEditResult
+{
+    bool ok = false;
+    std::string containerId, message;
+    explicit operator bool() const noexcept { return ok; }
+};
+
+/** Sostituisce clip sorelle con un container. I figli mantengono identita' e
+    stato e diventano relativi all'inizio del container. `parentContainerId`
+    vuoto indica la lane radice. */
+[[nodiscard]] ClipContainerEditResult createClipContainer (
+    Track&, const std::string& parentContainerId,
+    const std::vector<std::string>& clipIds, std::string containerId);
+
+/** Sostituisce un container con i figli diretti, riportandoli nelle coordinate
+    del parent. Funziona a qualunque profondita'. */
+[[nodiscard]] bool dissolveClipContainer (Track&, const std::string& containerId);
+
+struct ClipSplitLineage
+{
+    std::string leftId, rightId;
+    double fraction = 0.5;
+};
+
+struct ClipSplitEditResult
+{
+    bool ok = false;
+    std::string rightClipId, message;
+    std::vector<ClipSplitLineage> lineage;
+    explicit operator bool() const noexcept { return ok; }
+};
+
+/** Divide una clip e, per una EditSource, partiziona ricorsivamente il
+    sotto-arrangement. Nessun figlio intero compare in entrambe le meta'.
+    `mintId` deve restituire un'identita' unica per ogni base richiesta. */
+[[nodiscard]] ClipSplitEditResult splitClip (
+    Track&, const std::string& clipId, double splitTime,
+    const std::function<std::string(const std::string&)>& mintId);
+
+/** Copia ricorsivamente tutti gli ID in un set gia' allocato dal chiamante. */
+void collectClipIds(const Clip&, std::vector<std::string>& output);
 std::vector<std::string> visibleOrder(const Session&);
 Audibility audibility(const Session&, const Track&);
 int minimumHeight(const Track&) noexcept;

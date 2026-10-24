@@ -982,15 +982,11 @@ void LabComponent::updateClipFade(const std::string& trackId, const std::string&
     auto s = model.state();
     auto* t = findTrack(s, trackId);
     if (!t) return;
-    for (auto& c : t->clips)
+    if (auto* c=findClip(*t,clipId))
     {
-        if (c.id == clipId)
-        {
-            c.fadeIn = std::clamp(fadeIn, 0.0, c.length - c.fadeOut);
-            c.fadeOut = std::clamp(fadeOut, 0.0, c.length - c.fadeIn);
-            model.commit(std::move(s), "Modifica Fade Clip");
-            return;
-        }
+        c->fadeIn = std::clamp(fadeIn, 0.0, c->length - c->fadeOut);
+        c->fadeOut = std::clamp(fadeOut, 0.0, c->length - c->fadeIn);
+        model.commit(std::move(s), "Modifica Fade Clip");
     }
 }
 
@@ -998,41 +994,27 @@ std::string LabComponent::splitClip(const std::string& trackId,
                                     const std::string& clipId,
                                     const double splitTime)
 {
+    if (onSplitClip)
+        return onSplitClip(trackId, clipId, splitTime);
+
     auto s = model.state();
     auto* t = findTrack(s, trackId);
     if (!t) { return {}; }
-    for (auto it = t->clips.begin(); it != t->clips.end(); ++it)
+    std::set<std::string> reserved;
+    const auto mintId=[&](const std::string& base)
     {
-        if (it->id == clipId)
+        std::string id=base;int suffix=1;
+        const auto exists=[&](const std::string& candidate)
         {
-            const double rel = splitTime - it->start;
-            if (rel > 0.2 && rel < it->length - 0.2)
-            {
-                Clip c2 = *it;
-                it->length = rel;
-                it->fadeOut = 0.0;
-
-                std::string newId = it->id + "_cut";
-                int counter = 1;
-                auto idExists = [&](const std::string& cid) {
-                    for (const auto& c : t->clips) if (c.id == cid) return true;
-                    return false;
-                };
-                while (idExists(newId))
-                    newId = it->id + "_cut_" + std::to_string(++counter);
-
-                c2.id = newId;
-                c2.start = splitTime;
-                c2.length = c2.length - rel;
-                c2.fadeIn = 0.0;
-                c2.fadeOut = 0.0;
-                t->clips.insert(it + 1, c2);
-                model.commit(std::move(s), "Taglio Clip");
-                return newId;
-            }
-            return {};
-        }
-    }
+            return std::any_of(s.tracks.begin(),s.tracks.end(),[&](const auto& track)
+                {return findClip(track,candidate)!=nullptr;});
+        };
+        while(exists(id)||reserved.contains(id))id=base+"_"+std::to_string(++suffix);
+        reserved.insert(id);return id;
+    };
+    const auto split=ayra::lab::splitClip(*t,clipId,splitTime,mintId);
+    if(!split)return {};
+    if(model.commit(std::move(s),"Taglio Clip"))return split.rightClipId;
     return {};
 }
 
@@ -1041,16 +1023,12 @@ void LabComponent::moveClip(const std::string& trackId, const std::string& clipI
     auto s = model.state();
     auto* t = findTrack(s, trackId);
     if (!t) return;
-    for (auto& c : t->clips)
+    if (auto* c=findClip(*t,clipId))
     {
-        if (c.id == clipId)
+        if (std::abs(c->start - newStart) > 0.0001)
         {
-            if (std::abs(c.start - newStart) > 0.0001)
-            {
-                c.start = std::max(0.0, newStart);
-                model.commit(std::move(s), "Sposta Clip");
-            }
-            return;
+            c->start = std::max(0.0, newStart);
+            model.commit(std::move(s), "Sposta Clip");
         }
     }
 }
@@ -1060,25 +1038,21 @@ void LabComponent::resizeClip(const std::string& trackId, const std::string& cli
     auto s = model.state();
     auto* t = findTrack(s, trackId);
     if (!t) return;
-    for (auto& c : t->clips)
+    if (auto* c=findClip(*t,clipId))
     {
-        if (c.id == clipId)
+        c->start = std::max(0.0, newStart);
+        c->length = std::max(0.125, newLength);
+        if (c->fadeIn + c->fadeOut > c->length)
         {
-            c.start = std::max(0.0, newStart);
-            c.length = std::max(0.125, newLength);
-            if (c.fadeIn + c.fadeOut > c.length)
+            const double sum = c->fadeIn + c->fadeOut;
+            if (sum > 0.0001)
             {
-                const double sum = c.fadeIn + c.fadeOut;
-                if (sum > 0.0001)
-                {
-                    const double scale = (c.length * 0.95) / sum;
-                    c.fadeIn *= scale;
-                    c.fadeOut *= scale;
-                }
+                const double scale = (c->length * 0.95) / sum;
+                c->fadeIn *= scale;
+                c->fadeOut *= scale;
             }
-            model.commit(std::move(s), "Ridimensiona Clip");
-            return;
         }
+        model.commit(std::move(s), "Ridimensiona Clip");
     }
 }
 
@@ -1092,28 +1066,38 @@ std::vector<std::string> LabComponent::duplicateClipLoop(const std::string& trac
     auto* t = findTrack(s, trackId);
     if (!t) return {};
 
-    auto it = std::find_if(t->clips.begin(), t->clips.end(),
+    const auto scope=findClipSiblingScope(*t,clipId);
+    if(scope.clips==nullptr)return {};
+    auto& siblings=*scope.clips;
+    auto it = std::find_if(siblings.begin(), siblings.end(),
                            [&](const Clip& c) { return c.id == clipId; });
-    if (it == t->clips.end()) return {};
+    if (it == siblings.end()) return {};
 
     const Clip orig = *it;
     const double L = orig.length;
     if (L < 0.125) return {};
 
     auto idExists = [&](const std::string& cid) {
-        for (const auto& track : s.tracks)
-            for (const auto& c : track.clips)
-                if (c.id == cid) return true;
-        return false;
+        return std::any_of(s.tracks.begin(),s.tracks.end(),[&](const auto& track)
+            {return findClip(track,cid)!=nullptr;});
     };
 
-    const int maxAllowed = std::max(0, 64 - static_cast<int>(t->clips.size()));
+    const int maxAllowed = std::max(0, 64 - static_cast<int>(siblings.size()));
     const int numToCreate = std::min(count, maxAllowed);
     if (numToCreate <= 0) return {};
 
     std::vector<std::string> createdIds;
     createdIds.reserve(static_cast<size_t>(numToCreate));
 
+    std::set<std::string> reservedIds;
+    const auto uniqueId=[&](const std::string& base)
+    {
+        std::string id=base;int suffix=1;
+        while(idExists(id)||reservedIds.contains(id))id=base+"_"+std::to_string(++suffix);
+        reservedIds.insert(id);return id;
+    };
+    const auto remint=[&](auto&& self,Clip& parent)->void
+    {for(auto& child:parent.children){child.id=uniqueId(child.id+"_loop");self(self,child);}};
     for (int k = 1; k <= numToCreate; ++k)
     {
         const double newStart = appendAfter ? (orig.start + static_cast<double>(k) * L)
@@ -1122,21 +1106,19 @@ std::vector<std::string> LabComponent::duplicateClipLoop(const std::string& trac
             break;
 
         Clip dup = orig;
-        int counter = k;
-        std::string newId = orig.id + "_loop_" + std::to_string(counter);
-        while (idExists(newId))
-            newId = orig.id + "_loop_" + std::to_string(++counter);
+        const std::string newId=uniqueId(orig.id+"_loop_"+std::to_string(k));
 
         dup.id = newId;
         dup.start = newStart;
         dup.length = L;
+        remint(remint,dup);
         createdIds.push_back(newId);
-        t->clips.push_back(dup);
+        siblings.push_back(std::move(dup));
     }
 
     if (createdIds.empty()) return {};
 
-    std::sort(t->clips.begin(), t->clips.end(),
+    std::sort(siblings.begin(), siblings.end(),
               [](const Clip& a, const Clip& b) { return a.start < b.start; });
 
     model.commit(std::move(s), "Loop Clip");

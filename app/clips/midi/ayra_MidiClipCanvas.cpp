@@ -14,6 +14,7 @@ using clips::MidiCcGhostLaneVisual;
 using clips::MidiClipComponent;
 using clips::MidiClipVisual;
 using clips::MidiEnvelopePoint;
+using clips::GainPoint;
 using clips::MidiNoteVisual;
 using clips::MidiOverlayTarget;
 using clips::MidiProgramChangeVisual;
@@ -53,6 +54,7 @@ struct MidiClipUIState {
 
   std::vector<MidiSourceNote> notes;
   std::vector<MidiSourceProgramChange> programChanges;
+  std::vector<GainPoint> containerGainPoints = clips::makeDefaultContainerGainEnvelope();
 
   std::vector<MidiWarpPoint> warpPoints;
   std::vector<float> warpMarkers;
@@ -300,6 +302,14 @@ public:
   }
 
   juce::String getTooltip() override {
+    const auto* interactionClip = findClip(
+        draggedClipId.empty() ? hoveredClipId : draggedClipId);
+    if (interactionClip != nullptr && interactionClip->isContainer()) {
+      const auto tooltip = clips::containerTransformTooltip(
+          draggedClipId.empty() ? activeZone : dragZone);
+      if (tooltip.isNotEmpty())
+        return tooltip;
+    }
     switch (activeZone) {
     case TimelineClipZone::edgeLeftLoop:
     case TimelineClipZone::edgeRightLoop:
@@ -345,7 +355,7 @@ public:
              "(Doppio click reset, Alt+Click elimina)";
     case TimelineClipZone::bottomCutRail:
       if(juce::ModifierKeys::getCurrentModifiersRealtime().isShiftDown())
-        return "Glue orizzontale: Shift+clic raggruppa selezione o clip successiva; Shift+doppio clic tutta la lane";
+        return "Glue orizzontale immediato: Shift+clic raggruppa la selezione o la clip successiva";
       return "Binario di Taglio MIDI (Forbici)\nClicca per dividere la clip "
              "con CC Chase automatico e taglio note (Alt+Click mantiene le "
              "note intere in overhang)";
@@ -644,6 +654,8 @@ public:
 
     auto &orig = uiStates[origId];
     MidiClipUIState next;
+    next.containerGainPoints = clips::splitContainerGainEnvelope(
+        orig.containerGainPoints, splitFrac);
     next.isDrumMode = orig.isDrumMode;
     next.transposeSemitones = orig.transposeSemitones;
     next.velocityOffset = orig.velocityOffset;
@@ -765,24 +777,22 @@ public:
   }
 
   void setModel(const Track &t, int midiHeight) {
+    const auto reconcileSplits = [this] {
+      clips::reconcileDerivedClipSplits(panelView.clipSplits,
+          [this](const std::string &id) { return uiStates.contains(id); },
+          [this](const std::string &left, const std::string &right, float fraction) {
+            splitMidiClipUI(left, right, fraction, false);
+          });
+    };
+    reconcileSplits();
     data = t;
     height = midiHeight;
     programAudible = audibility(host.store().state(), data).program;
 
-    std::set<std::string> live;
-    for (const auto &c : t.clips) {
+    std::set<std::string> live, liveComponents;
+    const auto prepareVisualState = [&](auto&& self, const Clip& c) -> void {
       live.insert(c.id);
-
-      auto component = clipComponents.find(c.id);
-      if (component == clipComponents.end()) {
-        auto &provider =
-            static_cast<clips::MidiClipPresentationProvider &>(*this);
-        auto midiClip = std::make_unique<MidiClipComponent>(c.id, provider);
-        addAndMakeVisible(*midiClip);
-        component = clipComponents.emplace(c.id, std::move(midiClip)).first;
-      }
-      component->second->toFront(false);
-
+      if (!uiStates.contains(c.id)) reconcileSplits();
       if (!uiStates.contains(c.id)) {
         MidiClipUIState s;
         s.zoomLod = clip_midi_law::zoomLodForTrackHeight(
@@ -794,10 +804,8 @@ public:
         s.startSourceOffsetSec = s.sourceOffsetSec;
         s.isDrumMode = juce::String(c.name).containsIgnoreCase("drum") ||
                        juce::String(c.name).containsIgnoreCase("kit");
-
         s.notes = makeSyntheticMidiNotes(c.seed, s.sourceOffsetSec, c.length,
                                          s.isDrumMode);
-
         if (!juce::String(c.id).contains("_cut")) {
           for (float frac : {0.25f, 0.75f}) {
             const double sampleTime =
@@ -805,7 +813,6 @@ public:
             s.warpPoints.push_back({sampleTime, sampleTime});
           }
         }
-
         syncMidiWarpNorms(s, c.length, s.sourceOffsetSec);
         rebuildClipVisualCache(c, s);
         uiStates[c.id] = std::move(s);
@@ -821,6 +828,26 @@ public:
         syncMidiWarpNorms(s, c.length, s.sourceOffsetSec);
         rebuildClipVisualCache(c, s);
       }
+      if (c.isContainer()) {
+        auto &s = uiStates[c.id];
+        s.pitchScrollbarVisible = false;
+        s.pitchScrollbarHideTimeMs = 0;
+      }
+      for (const auto& child : c.children) self(self, child);
+    };
+    for (const auto &c : t.clips) {
+      liveComponents.insert(c.id);
+
+      auto component = clipComponents.find(c.id);
+      if (component == clipComponents.end()) {
+        auto &provider =
+            static_cast<clips::MidiClipPresentationProvider &>(*this);
+        auto midiClip = std::make_unique<MidiClipComponent>(c.id, provider);
+        addAndMakeVisible(*midiClip);
+        component = clipComponents.emplace(c.id, std::move(midiClip)).first;
+      }
+      component->second->toFront(false);
+      prepareVisualState(prepareVisualState, c);
     }
 
     for (auto i = uiStates.begin(); i != uiStates.end();)
@@ -829,7 +856,7 @@ public:
       else
         ++i;
     for (auto i = clipComponents.begin(); i != clipComponents.end();)
-      if (!live.contains(i->first))
+      if (!liveComponents.contains(i->first))
         i = clipComponents.erase(i);
       else
         ++i;
@@ -1014,15 +1041,14 @@ private:
     MidiClipVisual visual;
     visual.bounds = localBodyBounds;
 
-    const auto clip = std::find_if(
-        data.clips.begin(), data.clips.end(),
-        [&clipId](const Clip &candidate) { return candidate.id == clipId; });
+    const auto* clip = ayra::lab::findClip(data, clipId);
     const auto state = uiStates.find(clipId);
-    if (clip == data.clips.end() || state == uiStates.end())
+    if (clip == nullptr || state == uiStates.end())
       return visual;
 
     auto &ui = state->second;
     syncMidiWarpNorms(ui, clip->length, ui.sourceOffsetSec);
+    visual.container={clip->isContainer(),static_cast<int>(clip->children.size()),0};
 
     visual.title = juce::String::fromUTF8(clip->name.c_str());
     visual.tint = juce::Colour(data.colour);
@@ -1061,7 +1087,7 @@ private:
 
     const bool isDraggedClip = (draggedClipId == clipId);
     const bool pitchScrollbarVisible =
-        ui.pitchScrollbarVisible &&
+        !clip->isContainer() && ui.pitchScrollbarVisible &&
         (ui.zoomLod != clip_midi_law::ZoomLod::preview);
     visual.showPitchScrollbar = pitchScrollbarVisible;
     visual.pitchScrollbarActive =
@@ -1070,7 +1096,9 @@ private:
     const bool isDraggingWarp =
         isDraggedClip && (dragZone == TimelineClipZone::warpMarker ||
                           dragZone == TimelineClipZone::topWarpRail);
-    const bool isDraggingEnv = false;
+    const bool isDraggingEnv = isDraggedClip
+        && (dragZone == TimelineClipZone::gainEnvelopePoint
+            || dragZone == TimelineClipZone::gainEnvelopeLine);
 
     if (isDraggedClip) {
       visual.isDraggingPitchFeedback = isDraggingPitchFeedback;
@@ -1083,17 +1111,28 @@ private:
       visual.velocityFeedbackPosition = draggedVelocityFeedbackPos;
     }
 
+    auto featurePolicy = clipFeatures;
+    if (clip->isContainer()) featurePolicy.gainEnabled = true;
     visual.features =
-        computeClipFeaturesLOD(clipFeatures, localBodyBounds.getHeight(),
+        computeClipFeaturesLOD(featurePolicy, localBodyBounds.getHeight(),
                                isDraggingWarp, isDraggingEnv, static_cast<float>(height));
     visual.features.glueHover = juce::ModifierKeys::getCurrentModifiersRealtime().isShiftDown();
+    if (clip->isContainer()) {
+      visual.container.gainPoints = ui.containerGainPoints.data();
+      visual.container.numGainPoints =
+          static_cast<int>(ui.containerGainPoints.size());
+      visual.container.showGainEnvelope = visual.features.showGainEnvelope;
+      visual.container.showGainPreview = visual.features.showEnvelopePreview;
+    }
 
     if (hoveredClipId == clipId ||
         (isDraggedClip && dragZone != TimelineClipZone::none)) {
       const float localMouseX = mousePos.x - parentOrigin.x;
       visual.hoveredZone = isDraggedClip ? dragZone : activeZone;
-      visual.hoveredMarkerIdx = hoveredMarkerIdx;
-      visual.hoveredEnvelopePointIdx = -1;
+      visual.hoveredMarkerIdx = isDraggedClip
+          ? draggedMarkerIdx : hoveredMarkerIdx;
+      visual.hoveredEnvelopePointIdx = clip->isContainer()
+          ? (isDraggedClip ? draggedEnvelopeIdx : hoveredEnvelopeIdx) : -1;
       visual.hoveredCurveSegmentIdx = -1;
       visual.hoveredNoteIdx = hoveredNoteIdx;
       visual.hoveredProgramChangeIdx = -1;
@@ -1150,6 +1189,81 @@ private:
       }
     }
 
+    if (clip->isContainer())
+      visual.container.hoveredGainPointIdx = visual.hoveredEnvelopePointIdx;
+
+    if (!buildingContainedPreviews && clip->isContainer()) {
+      clips::buildNestedClipPlacements(
+          *clip, localBodyBounds, nestedPlacementsScratch,
+          [this](const Clip& parent, const float sourceNorm) {
+            const auto state = uiStates.find(parent.id);
+            if (state == uiStates.end()) return sourceNorm;
+            return clips::mapNormalizedWarp(
+                sourceNorm, state->second.origWarpMarkers,
+                state->second.warpMarkers);
+          },
+          [this](const Clip& parent, const float outputNorm) {
+            const auto state = uiStates.find(parent.id);
+            return state == uiStates.end()
+                ? 1.0f
+                : clips::evaluateContainerGainScale(
+                      state->second.containerGainPoints, outputNorm);
+          });
+      containedVisualsScratch.clear();
+      containedVisualsScratch.reserve(nestedPlacementsScratch.size());
+      buildingContainedPreviews = true;
+      for (const auto& placement : nestedPlacementsScratch) {
+        auto child = makeMidiClipVisual(placement.clipId, placement.bounds,
+                                        parentOrigin);
+        child.container = {placement.isContainer, placement.numDirectChildren,
+                           placement.depth};
+        child.containedClipPreviews = nullptr;
+        child.numContainedClipPreviews = 0;
+        child.selected = false;
+        child.hoveredZone = TimelineClipZone::none;
+        child.overlap = {};
+        child.zoomLod = clip_midi_law::ZoomLod::preview;
+        child.showPitchScrollbar = false;
+        child.pitchScrollbarActive = false;
+        child.features = {};
+        child.features.warpEnabled = false;
+        child.features.gainEnabled = false;
+        child.features.cutEnabled = false;
+        child.features.fadesEnabled = false;
+        child.features.edgeToolsEnabled = false;
+        child.features.showWarpRail = false;
+        child.features.showWarpControls = false;
+        child.features.showGainEnvelope = false;
+        child.features.showEnvelopePreview = false;
+        child.features.showCutRail = false;
+        child.features.showFadeHandles = false;
+        child.features.showEdgeTools = false;
+        child.features.showDisplacementBadges = false;
+        child.features.glueHover = false;
+        if (child.notes != nullptr && child.numNotes > 0)
+          child.ownedPreviewNotes.assign(
+              child.notes, child.notes + child.numNotes);
+        for (auto& note : child.ownedPreviewNotes) {
+          const float midpoint = (note.startNormX + note.endNormX) * 0.5f;
+          note.startNormX = placement.transform.mapTime(note.startNormX);
+          note.endNormX = std::max(
+              note.startNormX + 0.001f,
+              placement.transform.mapTime(note.endNormX));
+          note.velocity = static_cast<std::uint8_t>(juce::jlimit(
+              1, 127, juce::roundToInt(
+                  static_cast<float>(note.velocity)
+                  * placement.transform.gainAt(midpoint))));
+        }
+        containedVisualsScratch.push_back(std::move(child));
+        auto& stored = containedVisualsScratch.back();
+        stored.notes = stored.ownedPreviewNotes.data();
+        stored.numNotes = static_cast<int>(stored.ownedPreviewNotes.size());
+      }
+      buildingContainedPreviews = false;
+      visual.containedClipPreviews = containedVisualsScratch.data();
+      visual.numContainedClipPreviews =
+          static_cast<int>(containedVisualsScratch.size());
+    }
     return visual;
   }
 
@@ -1191,13 +1305,17 @@ private:
     const bool isDraggingWarp = !draggedClipId.empty() &&
         (dragZone == TimelineClipZone::warpMarker ||
                                  dragZone == TimelineClipZone::topWarpRail);
-    const bool isDraggingEnv = false;
+    const bool isDraggingEnv = !draggedClipId.empty()
+        && (dragZone == TimelineClipZone::gainEnvelopePoint
+            || dragZone == TimelineClipZone::gainEnvelopeLine);
 
     const auto sortedClips = getClipsSortedByZOrder();
     for (auto it = sortedClips.rbegin(); it != sortedClips.rend(); ++it) {
       const auto &c = **it;
       const auto b = clipBounds(c, pps);
-      const auto feat = computeClipFeaturesLOD(clipFeatures, b.getHeight(),
+      auto featurePolicy = clipFeatures;
+      if (c.isContainer()) featurePolicy.gainEnabled = true;
+      const auto feat = computeClipFeaturesLOD(featurePolicy, b.getHeight(),
                                                isDraggingWarp, isDraggingEnv, static_cast<float>(height));
 
       if (p.x >= b.getX() - 16.0f && p.x <= b.getRight() + 16.0f) {
@@ -1236,7 +1354,8 @@ private:
 
         // C) Scrollbar verticale del pitch (sul lato sinistro o destro)
         const auto &ui = uiStates.at(c.id);
-        if (ui.zoomLod != clip_midi_law::ZoomLod::preview &&
+        if (!c.isContainer() &&
+            ui.zoomLod != clip_midi_law::ZoomLod::preview &&
             ui.pitchScrollbarVisible) {
           const auto scrollbar = clips::computeMidiPitchScrollbarGeometry(
               b, ui.zoomLod, ui.displayMinPitch, ui.displayMaxPitch,
@@ -1272,6 +1391,16 @@ private:
           if (p.y <= b.getY() + kTitleAreaHeight) {
             res.zone = TimelineClipZone::clipTitleMove;
             return res;
+          }
+
+          if (c.isContainer() && feat.showGainEnvelope) {
+            const auto gainHit = clips::hitTestContainerGainEnvelope(
+                b, ui.containerGainPoints, p);
+            if (gainHit.zone != TimelineClipZone::none) {
+              res.zone = gainHit.zone;
+              res.envelopeIdx = gainHit.pointIndex;
+              return res;
+            }
           }
 
           // 3. Steli della lane Velocity. Lo stesso sourceIndex usato
@@ -1344,7 +1473,7 @@ private:
         continue;
       auto &ui = uiStates[c.id];
 
-      if (ui.zoomLod == clip_midi_law::ZoomLod::preview) {
+      if (c.isContainer() || ui.zoomLod == clip_midi_law::ZoomLod::preview) {
         ui.pitchScrollbarVisible = false;
         ui.pitchScrollbarHideTimeMs = 0;
         continue;
@@ -1383,7 +1512,7 @@ private:
       hoveredClipId = hit.clip->id;
       activeZone = hit.zone;
       hoveredMarkerIdx = hit.markerIdx;
-      hoveredEnvelopeIdx = -1;
+      hoveredEnvelopeIdx = hit.envelopeIdx;
       hoveredCurveSegmentIdx = -1;
       hoveredNoteIdx = hit.noteIdx;
       hoveredPcIdx = -1;
@@ -1391,9 +1520,15 @@ private:
       const bool isNote = activeZone == TimelineClipZone::midiNoteBody ||
                           activeZone == TimelineClipZone::midiNoteLeftEdge ||
                           activeZone == TimelineClipZone::midiNoteRightEdge;
+      const auto &ui = uiStates.at(hit.clip->id);
       const bool canErase = clips::isClipDeletionZone(activeZone) ||
                             activeZone == TimelineClipZone::warpMarker ||
-                            (isNote && hit.noteIdx >= 0);
+                            (isNote && hit.noteIdx >= 0) ||
+                            (hit.clip->isContainer() &&
+                             activeZone == TimelineClipZone::gainEnvelopePoint &&
+                             clips::canAutomationPointBeRemoved(
+                                 hit.envelopeIdx,
+                                 static_cast<int>(ui.containerGainPoints.size())));
       setMouseCursor(
           clips::timelineMouseCursor(clips::resolveTimelineCursorRole(
               {activeZone, e.mods.isAltDown(), e.mods.isShiftDown(), true,
@@ -1425,11 +1560,21 @@ private:
     const bool isNote = active == TimelineClipZone::midiNoteBody ||
                         active == TimelineClipZone::midiNoteLeftEdge ||
                         active == TimelineClipZone::midiNoteRightEdge;
-    const bool canErase =
+    bool canErase =
         clips::isClipDeletionZone(active) ||
         active == TimelineClipZone::warpMarker ||
         (isNote && (dragZone != TimelineClipZone::none ? draggedNoteIdx
                                                        : hoveredNoteIdx) >= 0);
+    const auto &cid = dragZone != TimelineClipZone::none
+        ? draggedClipId : hoveredClipId;
+    const auto* clip = findClip(cid);
+    if (clip != nullptr && clip->isContainer() && uiStates.contains(cid))
+      canErase = canErase ||
+          (active == TimelineClipZone::gainEnvelopePoint &&
+           clips::canAutomationPointBeRemoved(
+               dragZone != TimelineClipZone::none
+                   ? draggedEnvelopeIdx : hoveredEnvelopeIdx,
+               static_cast<int>(uiStates.at(cid).containerGainPoints.size())));
     setMouseCursor(clips::timelineMouseCursor(clips::resolveTimelineCursorRole(
         {active, modifiers.isAltDown(), modifiers.isShiftDown(), true,
          canErase})));
@@ -1462,7 +1607,7 @@ private:
   void mouseDown(const juce::MouseEvent &e) override {
     const auto hit = hitTestZones(e.position);
     if(groupGesture.mouseDown(e,hit.clip && hit.zone==TimelineClipZone::bottomCutRail,
-         hit.clip?hit.clip->id:std::string{},panelView.prepareTemporalGroup)){grabKeyboardFocus();return;}
+         hit.clip?hit.clip->id:std::string{},panelView.prepareGlue)){grabKeyboardFocus();return;}
 
     if (hit.clip != nullptr && e.mods.isPopupMenu()) {
       auto context = clips::makeTimelinePointerContext(
@@ -1529,11 +1674,34 @@ private:
     draggedClipId = hit.clip->id;
     dragZone = hit.zone;
     draggedMarkerIdx = hit.markerIdx;
-    draggedEnvelopeIdx = -1;
+    draggedEnvelopeIdx = hit.envelopeIdx;
     draggedCurveSegmentIdx = -1;
     draggedNoteIdx = hit.noteIdx;
     draggedPcIdx = -1;
     dragStartPos = e.position;
+
+    if (hit.clip->isContainer() &&
+        (hit.zone == TimelineClipZone::gainEnvelopePoint ||
+         hit.zone == TimelineClipZone::gainEnvelopeLine)) {
+      if (e.mods.isAltDown() && !e.mods.isPopupMenu() &&
+          hit.zone == TimelineClipZone::gainEnvelopePoint) {
+        std::ignore = clips::removeContainerGainPoint(
+            ui.containerGainPoints, hit.envelopeIdx);
+        resetDragState();
+        repaint();
+        return;
+      }
+      if (!e.mods.isLeftButtonDown()) {
+        resetDragState();
+        return;
+      }
+      if (hit.zone == TimelineClipZone::gainEnvelopePoint)
+        clips::selectContainerGainPoint(ui.containerGainPoints,
+                                        hit.envelopeIdx, e.mods);
+      startContainerGainPoints = ui.containerGainPoints;
+      repaint();
+      return;
+    }
 
     if (hit.zone == TimelineClipZone::midiPitchScrollbar) {
       draggedScrollbarOnLeft = ui.pitchScrollbarOnLeft;
@@ -1791,6 +1959,22 @@ private:
     const auto b = clipBounds(*cl, pps);
     constexpr float kTitleAreaHeight = 16.0f;
     const float bodyH = juce::jmax(10.0f, b.getHeight() - kTitleAreaHeight);
+
+    if (cl->isContainer() &&
+        (dragZone == TimelineClipZone::gainEnvelopePoint ||
+         dragZone == TimelineClipZone::gainEnvelopeLine)) {
+      if (dragZone == TimelineClipZone::gainEnvelopePoint)
+        clips::dragContainerGainPoint(
+            ui.containerGainPoints, startContainerGainPoints,
+            draggedEnvelopeIdx, b, dragStartPos, e.position,
+            e.mods.isShiftDown());
+      else
+        clips::dragContainerGainEnvelope(
+            ui.containerGainPoints, startContainerGainPoints,
+            b, dragStartPos, e.position);
+      repaint();
+      return;
+    }
 
     if (dragZone == TimelineClipZone::midiPitchScrollbar) {
       ui.pitchScrollbarVisible = true;
@@ -2326,6 +2510,12 @@ private:
         ui.freezePitchViewport = false;
         updateMidiClip(draggedClipId);
       }
+      if (dragZone == TimelineClipZone::gainEnvelopePoint ||
+          dragZone == TimelineClipZone::gainEnvelopeLine)
+        std::sort(ui.containerGainPoints.begin(), ui.containerGainPoints.end(),
+                  [](const GainPoint& a, const GainPoint& b) {
+                    return a.normX < b.normX;
+                  });
     }
 
     if (dragZone == TimelineClipZone::midiPitchScrollbar &&
@@ -2390,6 +2580,18 @@ private:
       bool anyChanged = false;
       for (auto &[cid, ui] : uiStates) {
 
+        if (ui.containerGainPoints.size() > 2) {
+          auto it = ui.containerGainPoints.begin() + 1;
+          while (it != ui.containerGainPoints.end() - 1) {
+            if (it->selected) {
+              it = ui.containerGainPoints.erase(it);
+              anyChanged = true;
+            } else {
+              ++it;
+            }
+          }
+        }
+
         for (auto it = ui.notes.begin(); it != ui.notes.end();) {
           if (it->selected) {
             it = ui.notes.erase(it);
@@ -2442,7 +2644,36 @@ private:
     if (hit.clip == nullptr)
       return;
 
+    if (clip_height_law::isHeaderAreaOrClosedClip(hit.zone,hit.bounds.getHeight(),hit.markerIdx)) {
+      if (panelView.enabled && panelView.cycleHeight) panelView.cycleHeight();
+      else host.store().resize(data.id,clip_height_law::nextModelHeight(
+          static_cast<float>(height),host.getVerticalZoom(),true));
+      return;
+    }
+    if (hit.clip->isContainer() &&
+        (hit.zone==TimelineClipZone::none||hit.zone==TimelineClipZone::clipBody) &&
+        panelView.openContainerEditor) {
+      panelView.openContainerEditor(hit.clip->id,*this,hit.bounds.toNearestInt());
+      return;
+    }
+
     auto &ui = uiStates[hit.clip->id];
+
+    if (hit.clip->isContainer()) {
+      if (hit.zone == TimelineClipZone::gainEnvelopePoint &&
+          hit.envelopeIdx >= 0 &&
+          hit.envelopeIdx < static_cast<int>(ui.containerGainPoints.size())) {
+        ui.containerGainPoints[static_cast<std::size_t>(hit.envelopeIdx)].gainDb = 0.0f;
+        repaint();
+        return;
+      }
+      if (hit.zone == TimelineClipZone::gainEnvelopeLine) {
+        clips::addContainerGainPoint(ui.containerGainPoints,
+                                     hit.bounds, e.position);
+        repaint();
+        return;
+      }
+    }
 
     if (hit.zone == TimelineClipZone::midiPitchScrollbar) {
       setPitchViewportCentre(ui, clip_midi_law::centreC3Pitch, true);
@@ -2538,18 +2769,16 @@ private:
       repaint();
       return;
     }
-    // Surface without a separate double-click action: cycle ONLY the lane's
-    // presentation height. Other semantic targets retain their own handlers.
-    if (hit.clip && clip_height_law::isHeaderAreaOrClosedClip(hit.zone,hit.bounds.getHeight(),hit.markerIdx)) {
-      if (panelView.enabled && panelView.cycleHeight) panelView.cycleHeight();
-      else host.store().resize(data.id, clip_height_law::nextModelHeight(
-          static_cast<float>(height), host.getVerticalZoom(), true));
-      return;
-    }
-
   }
 
 private:
+  [[nodiscard]] const Clip *findClip(const std::string &clipId) const noexcept {
+    const auto found = std::find_if(
+        data.clips.begin(), data.clips.end(),
+        [&clipId](const Clip &clip) { return clip.id == clipId; });
+    return found != data.clips.end() ? &*found : nullptr;
+  }
+
   void resetDragState() noexcept {
     draggedClipId.clear();
     dragZone = TimelineClipZone::none;
@@ -2573,6 +2802,9 @@ private:
   bool programAudible = true;
 
   std::map<std::string, MidiClipUIState> uiStates;
+  bool buildingContainedPreviews = false;
+  std::vector<clips::NestedClipPlacement> nestedPlacementsScratch;
+  std::vector<MidiClipVisual> containedVisualsScratch;
   clips::MidiOverlapMode midiOverlapMode = clips::MidiOverlapMode::replace;
   std::string lastSelectedClipId;
   std::map<std::string, std::unique_ptr<MidiClipComponent>> clipComponents;
@@ -2603,6 +2835,7 @@ private:
   juce::Point<float> dragStartPos;
 
   std::vector<MidiEnvelopePoint> startEnvelopePoints;
+  std::vector<GainPoint> startContainerGainPoints;
   std::vector<MidiSourceNote> startNotesSnapshot;
   std::vector<int> velocityDragIndices;
   float lastVelocityPaintX = 0.0f;

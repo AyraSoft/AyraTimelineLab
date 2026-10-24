@@ -1998,6 +1998,549 @@ struct ClipCommonStateVisual
     juce::Rectangle<float> auditionThumbnailBounds {};
 };
 
+struct ClipContainerVisual
+{
+    bool container = false;
+    int numDirectChildren = 0;
+    int previewDepth = 0;
+    const GainPoint* gainPoints = nullptr;
+    int numGainPoints = 0;
+    int hoveredGainPointIdx = -1;
+    bool showGainEnvelope = false;
+    bool showGainPreview = false;
+    [[nodiscard]] bool isContainer() const noexcept { return container; }
+    [[nodiscard]] bool isContainedPreview() const noexcept { return previewDepth > 0; }
+};
+
+/** Trasformazione ereditata da una preview contenuta.
+
+    L'input e' il tempo di uscita normalizzato della clip figlia. `outputNorm`
+    descrive la sua posizione dopo tutti i Warp dei container antenati;
+    `gainScale` e' il prodotto dei loro Gain. La tabella fissa evita heap e
+    mantiene un'unica proiezione per Audio, MIDI, Line e Image. */
+struct ContainedClipTransform
+{
+    static constexpr std::size_t numSamples = 65;
+    std::array<float, numSamples> outputNorm {};
+    std::array<float, numSamples> gainScale {};
+
+    ContainedClipTransform() noexcept
+    {
+        for (std::size_t i = 0; i < numSamples; ++i)
+        {
+            const float u = static_cast<float>(i) / static_cast<float>(numSamples - 1);
+            outputNorm[i] = u;
+            gainScale[i] = 1.0f;
+        }
+    }
+
+    [[nodiscard]] float mapTime(const float inputNorm) const noexcept
+    {
+        return evaluate(outputNorm, inputNorm);
+    }
+
+    [[nodiscard]] float gainAt(const float inputNorm) const noexcept
+    {
+        return evaluate(gainScale, inputNorm);
+    }
+
+private:
+    [[nodiscard]] static float evaluate(
+        const std::array<float, numSamples>& values, const float inputNorm) noexcept
+    {
+        const float position = juce::jlimit(0.0f, 1.0f, inputNorm)
+                             * static_cast<float>(numSamples - 1);
+        const auto lower = static_cast<std::size_t>(position);
+        const auto upper = std::min(lower + 1, numSamples - 1);
+        const float fraction = position - static_cast<float>(lower);
+        return values[lower] + fraction * (values[upper] - values[lower]);
+    }
+};
+
+[[nodiscard]] inline juce::Path transformContainedWaveformPath(
+    const juce::Path& source, const ContainedClipTransform& transform)
+{
+    juce::Path result;
+    result.preallocateSpace(source.getBounds().isEmpty() ? 32 : 600);
+    const auto point = [&transform] (const float x, const float y) noexcept
+    {
+        const float sourceNorm = juce::jlimit(0.0f, 1.0f, x / 1000.0f);
+        const float mappedX = transform.mapTime(sourceNorm) * 1000.0f;
+        const float gain = transform.gainAt(sourceNorm);
+        const float mappedY = juce::jlimit(0.0f, 100.0f, 50.0f + (y - 50.0f) * gain);
+        return juce::Point<float>(mappedX, mappedY);
+    };
+
+    juce::Path::Iterator iterator(source);
+    while (iterator.next())
+    {
+        switch (iterator.elementType)
+        {
+            case juce::Path::Iterator::startNewSubPath:
+            {
+                const auto p = point(iterator.x1, iterator.y1);
+                result.startNewSubPath(p);
+                break;
+            }
+            case juce::Path::Iterator::lineTo:
+            {
+                const auto p = point(iterator.x1, iterator.y1);
+                result.lineTo(p);
+                break;
+            }
+            case juce::Path::Iterator::quadraticTo:
+            {
+                const auto control = point(iterator.x1, iterator.y1);
+                const auto end = point(iterator.x2, iterator.y2);
+                result.quadraticTo(control, end);
+                break;
+            }
+            case juce::Path::Iterator::cubicTo:
+            {
+                const auto control1 = point(iterator.x1, iterator.y1);
+                const auto control2 = point(iterator.x2, iterator.y2);
+                const auto end = point(iterator.x3, iterator.y3);
+                result.cubicTo(control1, control2, end);
+                break;
+            }
+            case juce::Path::Iterator::closePath:
+                result.closeSubPath();
+                break;
+        }
+    }
+    return result;
+}
+
+/** Mappa source->output usando marker monotoni normalizzati e anchor impliciti
+    (0,0)/(1,1). Dati incompleti o non monotoni degradano deterministicamente
+    all'identita', senza produrre pieghe temporali. */
+[[nodiscard]] inline float mapNormalizedWarp(
+    const float sourceNorm,
+    const std::vector<float>& sourceMarkers,
+    const std::vector<float>& outputMarkers) noexcept
+{
+    const float source = juce::jlimit(0.0f, 1.0f, sourceNorm);
+    if (sourceMarkers.size() != outputMarkers.size()) { return source; }
+
+    float source0 = 0.0f;
+    float output0 = 0.0f;
+    for (std::size_t i = 0; i < sourceMarkers.size(); ++i)
+    {
+        const float source1 = sourceMarkers[i];
+        const float output1 = outputMarkers[i];
+        if (!std::isfinite(source1) || !std::isfinite(output1)
+            || source1 <= source0 || output1 <= output0
+            || source1 >= 1.0f || output1 >= 1.0f)
+            return source;
+        if (source <= source1)
+        {
+            const float fraction = (source - source0) / (source1 - source0);
+            return output0 + fraction * (output1 - output0);
+        }
+        source0 = source1;
+        output0 = output1;
+    }
+
+    const float fraction = (source - source0) / std::max(0.000001f, 1.0f - source0);
+    return output0 + fraction * (1.0f - output0);
+}
+
+struct NestedClipPlacement
+{
+    std::string clipId;
+    juce::Rectangle<float> bounds;
+    int depth = 1;
+    bool isContainer = false;
+    int numDirectChildren = 0;
+    ContainedClipTransform transform;
+};
+
+template <typename ClipType, typename WarpProjection, typename GainProjection>
+inline void buildNestedClipPlacements(const ClipType& container,
+                                      const juce::Rectangle<float> bounds,
+                                      std::vector<NestedClipPlacement>& output,
+                                      WarpProjection&& projectWarp,
+                                      GainProjection&& projectGain)
+{
+    output.clear();
+    if (!container.isContainer()) { return; }
+
+    const auto append = [&] (auto&& self, const ClipType& parent,
+                             const juce::Rectangle<float> parentBounds,
+                             const ContainedClipTransform& inherited,
+                             const int depth) -> void
+    {
+        const double duration = std::max(0.125, parent.length);
+        auto content = parentBounds.withTrimmedTop(
+            std::min(16.0f, parentBounds.getHeight() * 0.28f)).reduced(2.0f, 2.0f);
+        if (content.getWidth() < 1.0f || content.getHeight() < 4.0f) { return; }
+
+        for (const auto& child : parent.children)
+        {
+            const double visibleStart = std::clamp(child.start, 0.0, duration);
+            const double visibleEnd = std::clamp(child.start + child.length, 0.0, duration);
+            if (visibleEnd <= visibleStart + 1.0e-9) { continue; }
+
+            ContainedClipTransform transform;
+            float firstMapped = 0.0f;
+            float lastMapped = 1.0f;
+            for (std::size_t sample = 0; sample < ContainedClipTransform::numSamples; ++sample)
+            {
+                const float u = static_cast<float>(sample)
+                              / static_cast<float>(ContainedClipTransform::numSamples - 1);
+                const double childTime = child.start + static_cast<double>(u) * child.length;
+                const float parentSourceNorm = juce::jlimit(
+                    0.0f, 1.0f, static_cast<float>(childTime / duration));
+                const float parentOutputNorm = juce::jlimit(
+                    0.0f, 1.0f, projectWarp(parent, parentSourceNorm));
+                const float mapped = inherited.mapTime(parentOutputNorm);
+                if (sample == 0) { firstMapped = mapped; }
+                if (sample + 1 == ContainedClipTransform::numSamples) { lastMapped = mapped; }
+                transform.outputNorm[sample] = mapped;
+                transform.gainScale[sample] = juce::jlimit(
+                    0.0f, 16.0f,
+                    inherited.gainAt(parentOutputNorm)
+                        * projectGain(parent, parentOutputNorm));
+            }
+
+            const float mappedSpan = std::max(0.000001f, lastMapped - firstMapped);
+            for (auto& mapped : transform.outputNorm)
+                mapped = juce::jlimit(0.0f, 1.0f, (mapped - firstMapped) / mappedSpan);
+
+            const float x1 = content.getX() + firstMapped * content.getWidth();
+            const float x2 = content.getX() + lastMapped * content.getWidth();
+            const juce::Rectangle<float> childBounds(
+                x1, content.getY(), std::max(1.0f, x2 - x1), content.getHeight());
+            output.push_back({child.id, childBounds, depth, child.isContainer(),
+                              static_cast<int>(child.children.size()), transform});
+            if (child.isContainer())
+                self(self, child, childBounds, transform, depth + 1);
+        }
+    };
+    append(append, container, bounds, ContainedClipTransform {}, 1);
+}
+
+template <typename ClipType>
+inline void buildNestedClipPlacements(const ClipType& container,
+                                      const juce::Rectangle<float> bounds,
+                                      std::vector<NestedClipPlacement>& output)
+{
+    buildNestedClipPlacements(
+        container, bounds, output,
+        [] (const ClipType&, const float sourceNorm) noexcept { return sourceNorm; },
+        [] (const ClipType&, const float) noexcept { return 1.0f; });
+}
+
+[[nodiscard]] inline std::vector<GainPoint> makeDefaultContainerGainEnvelope()
+{
+    return { { 0.0f, 0.0f, 0.5f, false },
+             { 1.0f, 0.0f, 0.5f, false } };
+}
+
+[[nodiscard]] inline juce::String containerTransformTooltip(
+    const TimelineClipZone zone)
+{
+    switch (zone)
+    {
+        case TimelineClipZone::gainEnvelopePoint:
+            return "Gain Container\nTrascina per scalare tutto il contenuto; "
+                   "Shift blocca il tempo, Alt elimina i punti interni";
+        case TimelineClipZone::gainEnvelopeLine:
+            return "Gain Container\nTrascina in verticale l'intero inviluppo; "
+                   "doppio click inserisce un punto";
+        case TimelineClipZone::topWarpRail:
+            return "Warp Container\nClicca per inserire un marker che deforma "
+                   "clip, container annidati e spazi vuoti";
+        case TimelineClipZone::warpMarker:
+            return "Warp Container\nTrascina per comprimere o espandere "
+                   "l'intero sotto-arrangement senza modificare i figli";
+        default:
+            return {};
+    }
+}
+
+[[nodiscard]] inline ayra::curves::CurveBoundarySpec
+containerGainBoundarySpec() noexcept
+{
+    ayra::curves::CurveBoundarySpec boundary;
+    boundary.mode = ayra::curves::CurveBoundaryMode::pinnedEndpoints;
+    boundary.startValue = clip_gain_law::dbToNorm(0.0f);
+    boundary.endValue = clip_gain_law::dbToNorm(0.0f);
+    return boundary;
+}
+
+[[nodiscard]] inline float evaluateContainerGainScale(
+    const std::vector<GainPoint>& points, const float outputNorm) noexcept
+{
+    const float gainDb = clip_gain_law::evaluateGainDbAt(
+        points.data(), static_cast<int>(points.size()), 0.0f, outputNorm,
+        containerGainBoundarySpec());
+    return clip_gain_law::dbToGainScale(gainDb);
+}
+
+[[nodiscard]] inline std::vector<GainPoint> splitContainerGainEnvelope(
+    std::vector<GainPoint>& left, const float splitNorm)
+{
+    std::vector<AutomationPoint> source;
+    source.reserve(left.size());
+    for (const auto& point : left) { source.push_back(gainPointAsAutomationPoint(point)); }
+    const auto split = splitAutomationPointSequence(
+        source, clip_gain_law::dbToNorm(0.0f), splitNorm,
+        containerGainBoundarySpec());
+
+    left.clear();
+    left.reserve(split.left.size());
+    for (const auto& point : split.left) { left.push_back(automationPointAsGainPoint(point)); }
+    std::vector<GainPoint> right;
+    right.reserve(split.right.size());
+    for (const auto& point : split.right) { right.push_back(automationPointAsGainPoint(point)); }
+    return right;
+}
+
+[[nodiscard]] inline juce::Rectangle<float> containerGainCurveBounds(
+    const juce::Rectangle<float> bounds) noexcept
+{
+    return bounds.withTrimmedTop(std::min(16.0f, bounds.getHeight() * 0.28f))
+                 .reduced(3.0f, 2.0f);
+}
+
+struct ContainerGainHit
+{
+    TimelineClipZone zone { TimelineClipZone::none };
+    int pointIndex = -1;
+};
+
+inline void selectContainerGainPoint(
+    std::vector<GainPoint>& points, const int pointIndex,
+    const juce::ModifierKeys modifiers) noexcept
+{
+    if (pointIndex < 0 || pointIndex >= static_cast<int>(points.size())) { return; }
+    auto& point = points[static_cast<std::size_t>(pointIndex)];
+    if (modifiers.isShiftDown())
+        point.selected = true;
+    else if (modifiers.isCommandDown() || modifiers.isCtrlDown())
+        point.selected = !point.selected;
+    else
+    {
+        if (!point.selected)
+            for (auto& candidate : points) { candidate.selected = false; }
+        point.selected = true;
+    }
+}
+
+[[nodiscard]] inline bool removeContainerGainPoint(
+    std::vector<GainPoint>& points, const int pointIndex)
+{
+    if (!canAutomationPointBeRemoved(pointIndex, static_cast<int>(points.size())))
+        return false;
+    points.erase(points.begin() + pointIndex);
+    return true;
+}
+
+inline void dragContainerGainPoint(
+    std::vector<GainPoint>& points,
+    const std::vector<GainPoint>& initial,
+    const int pointIndex,
+    const juce::Rectangle<float> clipBounds,
+    const juce::Point<float> dragStart,
+    const juce::Point<float> position,
+    const bool lockHorizontal = false) noexcept
+{
+    if (pointIndex < 0 || pointIndex >= static_cast<int>(points.size())
+        || points.size() != initial.size())
+        return;
+    const auto bounds = containerGainCurveBounds(clipBounds);
+    const float requestedDeltaX = lockHorizontal
+        ? 0.0f
+        : (position.x - dragStart.x) / std::max(1.0f, bounds.getWidth());
+    const float deltaNormY = -(position.y - dragStart.y) / std::max(1.0f, bounds.getHeight());
+    const float deltaDb = clip_gain_law::normToDb(
+        juce::jlimit(0.0f, 1.0f,
+            clip_gain_law::dbToNorm(initial[static_cast<std::size_t>(pointIndex)].gainDb)
+                + deltaNormY))
+        - initial[static_cast<std::size_t>(pointIndex)].gainDb;
+
+    const bool moveSelection = initial[static_cast<std::size_t>(pointIndex)].selected;
+    const auto movesHorizontally = [&] (const std::size_t index) noexcept
+    {
+        if (index == 0 || index + 1 == initial.size()) { return false; }
+        return index == static_cast<std::size_t>(pointIndex)
+            || (moveSelection && initial[index].selected);
+    };
+    float minimumDeltaX = -1.0f;
+    float maximumDeltaX = 1.0f;
+    for (std::size_t i = 1; i + 1 < initial.size(); ++i)
+    {
+        if (!movesHorizontally(i)) { continue; }
+
+        if (!movesHorizontally(i - 1))
+            minimumDeltaX = std::max(
+                minimumDeltaX, initial[i - 1].normX + 0.01f - initial[i].normX);
+        if (!movesHorizontally(i + 1))
+            maximumDeltaX = std::min(
+                maximumDeltaX, initial[i + 1].normX - 0.01f - initial[i].normX);
+    }
+    const float deltaX = juce::jlimit(
+        minimumDeltaX, maximumDeltaX, requestedDeltaX);
+
+    for (std::size_t i = 0; i < points.size(); ++i)
+    {
+        if (i != static_cast<std::size_t>(pointIndex)
+            && (!moveSelection || !initial[i].selected))
+            continue;
+        points[i].gainDb = juce::jlimit(-60.0f, 48.0f, initial[i].gainDb + deltaDb);
+        if (i > 0 && i + 1 < points.size())
+            points[i].normX = initial[i].normX + deltaX;
+    }
+}
+
+inline void dragContainerGainEnvelope(
+    std::vector<GainPoint>& points,
+    const std::vector<GainPoint>& initial,
+    const juce::Rectangle<float> clipBounds,
+    const juce::Point<float> dragStart,
+    const juce::Point<float> position) noexcept
+{
+    if (points.size() != initial.size()) { return; }
+    const auto bounds = containerGainCurveBounds(clipBounds);
+    const float deltaNormY = -(position.y - dragStart.y) / std::max(1.0f, bounds.getHeight());
+    for (std::size_t i = 0; i < points.size(); ++i)
+    {
+        const float nextNorm = juce::jlimit(
+            0.0f, 1.0f, clip_gain_law::dbToNorm(initial[i].gainDb) + deltaNormY);
+        points[i].gainDb = clip_gain_law::normToDb(nextNorm);
+    }
+}
+
+inline void addContainerGainPoint(
+    std::vector<GainPoint>& points,
+    const juce::Rectangle<float> clipBounds,
+    const juce::Point<float> position)
+{
+    const auto bounds = containerGainCurveBounds(clipBounds);
+    const float x = juce::jlimit(
+        0.01f, 0.99f, (position.x - bounds.getX()) / std::max(1.0f, bounds.getWidth()));
+    const float y = juce::jlimit(
+        0.0f, 1.0f, (bounds.getBottom() - position.y) / std::max(1.0f, bounds.getHeight()));
+    for (auto& point : points) { point.selected = false; }
+    points.push_back({ x, clip_gain_law::normToDb(y), 0.5f, true });
+    std::sort(points.begin(), points.end(),
+              [] (const GainPoint& a, const GainPoint& b) { return a.normX < b.normX; });
+}
+
+[[nodiscard]] inline ContainerGainHit hitTestContainerGainEnvelope(
+    const juce::Rectangle<float> clipBounds,
+    const std::vector<GainPoint>& points,
+    const juce::Point<float> position) noexcept
+{
+    const auto bounds = containerGainCurveBounds(clipBounds);
+    if (points.size() < 2 || !bounds.contains(position)) { return {}; }
+
+    for (int i = 0; i < static_cast<int>(points.size()); ++i)
+    {
+        const auto& point = points[static_cast<std::size_t>(i)];
+        const juce::Point<float> pixel {
+            bounds.getX() + juce::jlimit(0.0f, 1.0f, point.normX) * bounds.getWidth(),
+            bounds.getBottom() - clip_gain_law::dbToNorm(point.gainDb) * bounds.getHeight()
+        };
+        if (pixel.getDistanceFrom(position) <= 8.5f)
+            return { TimelineClipZone::gainEnvelopePoint, i };
+    }
+
+    const float normX = juce::jlimit(
+        0.0f, 1.0f, (position.x - bounds.getX()) / std::max(1.0f, bounds.getWidth()));
+    const float gainDb = clip_gain_law::evaluateGainDbAt(
+        points.data(), static_cast<int>(points.size()), 0.0f, normX,
+        containerGainBoundarySpec());
+    const float curveY = bounds.getBottom()
+                       - clip_gain_law::dbToNorm(gainDb) * bounds.getHeight();
+    if (std::abs(position.y - curveY) <= 8.0f)
+        return { TimelineClipZone::gainEnvelopeLine, -1 };
+    return {};
+}
+
+inline void drawContainerGainEnvelope(
+    juce::Graphics& g,
+    const juce::Rectangle<float> clipBounds,
+    const ClipContainerVisual& container,
+    const juce::Colour tint)
+{
+    if (!container.isContainer() || container.isContainedPreview()
+        || (!container.showGainEnvelope && !container.showGainPreview)
+        || container.gainPoints == nullptr || container.numGainPoints < 2)
+        return;
+
+    const auto bounds = containerGainCurveBounds(clipBounds);
+    juce::Path curve;
+    constexpr int samples = 65;
+    for (int i = 0; i < samples; ++i)
+    {
+        const float xNorm = static_cast<float>(i) / static_cast<float>(samples - 1);
+        const float gainDb = clip_gain_law::evaluateGainDbAt(
+            container.gainPoints, container.numGainPoints, 0.0f, xNorm,
+            containerGainBoundarySpec());
+        const float x = bounds.getX() + xNorm * bounds.getWidth();
+        const float y = bounds.getBottom()
+                      - clip_gain_law::dbToNorm(gainDb) * bounds.getHeight();
+        if (i == 0) curve.startNewSubPath(x, y); else curve.lineTo(x, y);
+    }
+
+    juce::Path underlay(curve);
+    underlay.lineTo(bounds.getRight(), bounds.getBottom());
+    underlay.lineTo(bounds.getX(), bounds.getBottom());
+    underlay.closeSubPath();
+    g.setColour(juce::Colour(0x30000000));
+    g.fillPath(underlay);
+    g.setColour(tint.brighter(0.75f).withAlpha(
+        container.showGainEnvelope ? 0.95f : 0.62f));
+    g.strokePath(curve, juce::PathStrokeType(container.showGainEnvelope ? 1.7f : 1.0f));
+
+    if (container.showGainEnvelope)
+    {
+        for (int i = 0; i < container.numGainPoints; ++i)
+        {
+            const auto& point = container.gainPoints[i];
+            const float x = bounds.getX() + point.normX * bounds.getWidth();
+            const float y = bounds.getBottom()
+                          - clip_gain_law::dbToNorm(point.gainDb) * bounds.getHeight();
+            g.setColour(i == container.hoveredGainPointIdx
+                            ? juce::Colours::white : tint.brighter(0.85f));
+            g.fillEllipse(x - 3.5f, y - 3.5f, 7.0f, 7.0f);
+        }
+
+        const auto label = juce::Rectangle<float>(
+            bounds.getX() + 3.0f, bounds.getY() + 2.0f, 66.0f, 12.0f);
+        g.setColour(juce::Colour(0xc9121820));
+        g.fillRoundedRectangle(label, 3.0f);
+        g.setColour(tint.brighter(0.75f));
+        g.setFont(8.0f);
+        g.drawText("GROUP GAIN", label.toNearestInt(), juce::Justification::centred);
+    }
+}
+
+inline void drawClipContainerFrame(juce::Graphics& g,
+                                   const juce::Rectangle<float> bounds,
+                                   const ClipContainerVisual& container,
+                                   const juce::Colour tint)
+{
+    if (container.isContainedPreview())
+    {
+        const float alpha = std::max(0.32f, 0.72f - 0.09f * container.previewDepth);
+        g.setColour(tint.brighter(0.5f).withAlpha(alpha));
+        g.drawVerticalLine(juce::roundToInt(bounds.getX()), bounds.getY(), bounds.getBottom());
+        g.drawVerticalLine(juce::roundToInt(bounds.getRight()), bounds.getY(), bounds.getBottom());
+    }
+
+    if (!container.isContainer() || bounds.getWidth()<34.0f || bounds.getHeight()<12.0f) { return; }
+    auto header=bounds;
+    auto badge=header.removeFromTop(std::min(14.0f,bounds.getHeight())).removeFromRight(
+        std::min(64.0f,std::max(34.0f,bounds.getWidth()*0.32f))).reduced(2.0f);
+    g.setColour(juce::Colour(0xd911171c));g.fillRoundedRectangle(badge,3.0f);
+    g.setColour(tint.brighter(0.55f));g.drawRoundedRectangle(badge,3.0f,1.0f);
+    g.setFont(8.0f);g.drawFittedText("GLUE "+juce::String(container.numDirectChildren),
+                                    badge.toNearestInt(),juce::Justification::centred,1);
+}
+
 struct ClipOverlapVisual
 {
     bool hasOverlap = false;
@@ -2091,6 +2634,7 @@ struct AudioClipVisual
 
     const juce::Path* waveformPaths = nullptr;
     int numWaveformPaths = 0;
+    std::vector<juce::Path> ownedPreviewWaveformPaths;
 
     const GainPoint* gainPoints = nullptr;
     int numGainPoints = 0;
@@ -2103,6 +2647,9 @@ struct AudioClipVisual
     bool isSlipActive = false;
     ClipOverlapVisual overlap;
     ClipCommonStateVisual state;
+    ClipContainerVisual container;
+    const AudioClipVisual* containedClipPreviews = nullptr;
+    int numContainedClipPreviews = 0;
 };
 
 
@@ -2589,6 +3136,7 @@ struct MidiClipVisual
     // Note MIDI visibili
     const MidiNoteVisual* notes = nullptr;
     int numNotes = 0;
+    std::vector<MidiNoteVisual> ownedPreviewNotes;
 
     // Warp Markers (Linked Note+CC oppure Unlinked Solo-Note)
     const float* warpMarkersNorm     = nullptr;
@@ -2619,6 +3167,9 @@ struct MidiClipVisual
     bool isSlipActive      = false;
     ClipOverlapVisual overlap;
     ClipCommonStateVisual state;
+    ClipContainerVisual container;
+    const MidiClipVisual* containedClipPreviews = nullptr;
+    int numContainedClipPreviews = 0;
 };
 
 
@@ -2956,6 +3507,7 @@ struct LineClipVisual
 
     const MidiEnvelopePoint* points = nullptr;
     int numPoints = 0;
+    std::vector<MidiEnvelopePoint> ownedPreviewPoints;
     const float* warpMarkersNorm = nullptr;
     const float* origWarpMarkersNorm = nullptr;
     int numWarpMarkers = 0;
@@ -2976,6 +3528,9 @@ struct LineClipVisual
     bool isSlipActive = false;
     ClipOverlapVisual overlap;
     ClipCommonStateVisual state;
+    ClipContainerVisual container;
+    const LineClipVisual* containedClipPreviews = nullptr;
+    int numContainedClipPreviews = 0;
 };
 
 struct KeyframeEventVisual
